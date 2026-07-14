@@ -1,0 +1,10 @@
+numpy
+scipy
+librosa
+soundfile
+pydub
+Pillow
+moviepy
+imageio
+imageio-ffmpeg
+tkinterdnd2

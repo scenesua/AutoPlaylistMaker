@@ -1,0 +1,101 @@
+name: Build Auto Playlist Maker
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build exe
+        run: |
+          pyinstaller `
+            --name AutoPlaylistMaker `
+            --onefile `
+            --windowed `
+            --collect-all moviepy `
+            --collect-all imageio_ffmpeg `
+            --collect-all imageio `
+            --hidden-import tkinterdnd2 `
+            --add-data "visual_config.json;." `
+            app.py `
+            --noconfirm
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoPlaylistMaker-Windows
+          path: dist/AutoPlaylistMaker.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+          pip3 install pyinstaller
+
+      - name: Build executable
+        run: |
+          pyinstaller \
+            --name AutoPlaylistMaker \
+            --onefile \
+            --windowed \
+            --collect-all moviepy \
+            --collect-all imageio_ffmpeg \
+            --collect-all imageio \
+            --hidden-import tkinterdnd2 \
+            --add-data "visual_config.json:." \
+            app.py \
+            --noconfirm
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoPlaylistMaker-macOS
+          path: dist/AutoPlaylistMaker
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AutoPlaylistMaker-Windows/AutoPlaylistMaker.exe
+            AutoPlaylistMaker-macOS/AutoPlaylistMaker
+          draft: false
+          prerelease: false
