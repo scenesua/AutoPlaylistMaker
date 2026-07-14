@@ -97,5 +97,7 @@ jobs:
           files: |
             AutoPlaylistMaker-Windows/AutoPlaylistMaker.exe
             AutoPlaylistMaker-macOS/AutoPlaylistMaker
+            setup.bat
+            setup_mac.sh
           draft: false
           prerelease: false
