@@ -106,6 +106,25 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          name: "Auto Playlist Maker v${{ github.ref_name }}"
+          body: |
+            ## Auto Playlist Maker v${{ github.ref_name }}
+
+            ### Windows (.exe) + macOS 바이너리 포함
+
+            ### 주요 변경사항
+            - **트림 모달**: 타임라인 클릭 시 MM:SS:ms 시간 입력 모달 창
+            - **클립 목록 자동 분배**: Stage0 이미지/영상이 그룹별 클립 목록에 자동 포함
+            - **프로젝트 저장 강화**: 클립 목록, 클립 설정, 배경 이미지, 총 길이 저장/복원
+            - **수동 분배 순서 표시**: 드래그 시 삽입 위치 하이라이트 + 라벨
+            - **폰트 선택 개선**: 일반 텍스트/커스텀 텍스트 폰트를 Listbox + 스크롤바로 선택
+            - **설정 패널 스크롤바**: 눈에 띄는 스크롤바로 스크롤 가능 명시
+            - **단계 이동 수정**: 클립 목록→영상 편집 다음 버튼 오류 해결
+            - **자동 분배/수동 분배 토글**: 수동 분배 시 삽입 위치 시각 표시
+
+            ### 설치 방법
+            - **Windows**: `setup.bat` 실행 → ffmpeg 자동 설치 → `.exe` 실행
+            - **macOS**: `setup_mac.sh` 실행 → ffmpeg 자동 설치 → 바이너리 실행
           files: |
             AutoPlaylistMaker-Windows/AutoPlaylistMaker.exe
             AutoPlaylistMaker-macOS/AutoPlaylistMaker
