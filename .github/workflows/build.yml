@@ -35,6 +35,12 @@ jobs:
             --collect-all imageio_ffmpeg `
             --collect-all imageio `
             --hidden-import tkinterdnd2 `
+            --hidden-import pydub `
+            --hidden-import scipy `
+            --hidden-import scipy.ndimage `
+            --hidden-import librosa `
+            --hidden-import numpy `
+            --hidden-import PIL `
             --add-data "visual_config.json;." `
             app.py `
             --noconfirm
@@ -71,6 +77,12 @@ jobs:
             --collect-all imageio_ffmpeg \
             --collect-all imageio \
             --hidden-import tkinterdnd2 \
+            --hidden-import pydub \
+            --hidden-import scipy \
+            --hidden-import scipy.ndimage \
+            --hidden-import librosa \
+            --hidden-import numpy \
+            --hidden-import PIL \
             --add-data "visual_config.json:." \
             app.py \
             --noconfirm

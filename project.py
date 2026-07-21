@@ -129,6 +129,14 @@ class Project:
                 group_data = {
                     'name': vg.get('name', ''),
                     'tracks': [],
+                    'total_duration': vg.get('total_duration', 0),
+                    'bg_image': vg.get('bg_image', ''),
+                    'clip_enabled': vg.get('clip_enabled', False),
+                    'clip_interval': vg.get('clip_interval', 1.0),
+                    'clip_interval_unit': vg.get('clip_interval_unit', '초'),
+                    'clip_random': vg.get('clip_random', False),
+                    'clip_random_base': vg.get('clip_random_base', 'BPM'),
+                    'clips': [],
                 }
                 for track_info in vg.get('tracks', []):
                     td = {
@@ -145,6 +153,11 @@ class Project:
                         td['camelot'] = a.camelot
                         td['duration'] = round(a.duration, 1)
                     group_data['tracks'].append(td)
+                for clip_info in vg.get('clips', []):
+                    group_data['clips'].append({
+                        'filepath': clip_info.get('filepath', ''),
+                        'type': clip_info.get('type', 'image'),
+                    })
                 data['video_groups'].append(group_data)
 
         with open(self.project_file, 'w', encoding='utf-8') as f:

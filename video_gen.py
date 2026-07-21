@@ -70,10 +70,7 @@ def _ensure_ffmpeg_for_moviepy():
 def _write_log(lines):
     try:
         if getattr(sys, 'frozen', False):
-            if sys.platform == 'darwin':
-                log_dir = os.path.expanduser("~")
-            else:
-                log_dir = os.path.dirname(sys.executable)
+            log_dir = os.path.dirname(sys.executable)
         else:
             log_dir = os.path.dirname(os.path.abspath(__file__))
         log_path = os.path.join(log_dir, "ffmpeg_debug.log")
@@ -109,34 +106,18 @@ def _detect_gpu_encoder():
             return 'h264_vaapi'
         if 'h264_amf' in encoders:
             return 'h264_amf'
-        if 'h264_videotoolbox' in encoders:
-            return 'h264_videotoolbox'
     except Exception:
         pass
     return 'libx264'
 
 
 FONT_PATH = None
-if sys.platform == 'win32':
-    _font_search = [
-        "C:/Windows/Fonts/D2Coding-Ver1.3.2-20180524-all.ttc",
-        "C:/Windows/Fonts/D2Coding.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/msyh.ttc",
-    ]
-elif sys.platform == 'darwin':
-    _font_search = [
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/Library/Fonts/Arial.ttf",
-    ]
-else:
-    _font_search = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-    ]
+_font_search = [
+    "C:/Windows/Fonts/D2Coding-Ver1.3.2-20180524-all.ttc",
+    "C:/Windows/Fonts/D2Coding.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/msyh.ttc",
+]
 for _fp in _font_search:
     if os.path.isfile(_fp):
         FONT_PATH = _fp
@@ -191,31 +172,26 @@ def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
 
 
-def get_font(size):
+def get_font(size, family=None):
     import sys as _sys
-    if _sys.platform == 'darwin':
-        paths = [
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-            "/System/Library/Fonts/PingFang.ttc",
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-            "/Library/Fonts/Arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        ]
-    elif _sys.platform == 'win32':
-        local_appdata = _sys.modules.get('os').environ.get('LOCALAPPDATA', '')
-        paths = [
-            os.path.join(local_appdata, 'Microsoft', 'Windows', 'Fonts', 'D2Coding-Ver1.3.2-20180524-all.ttc') if local_appdata else '',
-            "C:/Windows/Fonts/D2Coding-Ver1.3.2-20180524-all.ttc",
-            "C:/Windows/Fonts/D2Coding.ttf",
-            "C:/Windows/Fonts/arial.ttf",
-            "C:/Windows/Fonts/msyh.ttc",
-        ]
-    else:
-        paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        ]
+
+    if family:
+        try:
+            return ImageFont.truetype(family, size)
+        except (OSError, IOError):
+            pass
+
+    local_appdata = _sys.platform == 'win32' and _sys.modules.get('os').environ.get('LOCALAPPDATA', '')
+    paths = [
+        os.path.join(local_appdata, 'Microsoft', 'Windows', 'Fonts', 'D2Coding-Ver1.3.2-20180524-all.ttc') if local_appdata else '',
+        "C:/Windows/Fonts/D2Coding-Ver1.3.2-20180524-all.ttc",
+        "C:/Windows/Fonts/D2Coding.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+    ]
     for p in paths:
         if not p:
             continue
@@ -507,9 +483,11 @@ def apply_beat_effects(frame_arr, t, beat_times, effects_cfg, width, height):
     img = Image.fromarray(frame_arr)
     orig_w, orig_h = img.size
 
+    scale = width / 1920.0
+
     if effects_cfg.get('bounce'):
         intensity = effects_cfg.get('bounce_intensity', 1.03)
-        shift = int(pulse * 15 * abs(intensity - 1.0) * 10)
+        shift = int(pulse * 15 * abs(intensity - 1.0) * 10 * scale)
         if shift > 0:
             img = img.transform((orig_w, orig_h), Image.AFFINE,
                                  (1, 0, 0, 0, 1, -shift), resample=Image.BILINEAR)
@@ -517,16 +495,16 @@ def apply_beat_effects(frame_arr, t, beat_times, effects_cfg, width, height):
     if effects_cfg.get('shake'):
         intensity = effects_cfg.get('shake_intensity', 3)
         import random
-        shake_x = int((random.random() - 0.5) * 2 * intensity * pulse)
-        shake_y = int((random.random() - 0.5) * 2 * intensity * pulse)
+        shake_x = int((random.random() - 0.5) * 2 * intensity * pulse * scale)
+        shake_y = int((random.random() - 0.5) * 2 * intensity * pulse * scale)
         img = img.transform((orig_w, orig_h), Image.AFFINE,
                              (1, 0, shake_x, 0, 1, shake_y), resample=Image.BILINEAR)
 
     if effects_cfg.get('zoom'):
         intensity = effects_cfg.get('zoom_intensity', 1.05)
-        scale = 1.0 + pulse * (intensity - 1.0)
-        new_w = int(orig_w * scale)
-        new_h = int(orig_h * scale)
+        scale_f = 1.0 + pulse * (intensity - 1.0)
+        new_w = int(orig_w * scale_f)
+        new_h = int(orig_h * scale_f)
         img = img.resize((new_w, new_h), Image.BILINEAR)
         left = (new_w - orig_w) // 2
         top = (new_h - orig_h) // 2
@@ -538,6 +516,82 @@ def apply_beat_effects(frame_arr, t, beat_times, effects_cfg, width, height):
             flash_alpha = pulse * intensity
             flash = Image.new('RGB', img.size, (255, 255, 255))
             img = Image.blend(img, flash, flash_alpha)
+
+    return np.array(img)
+
+
+def apply_crt_effect(frame_arr, cfg, width, height):
+    if not cfg.get('crt'):
+        return frame_arr
+
+    img = Image.fromarray(frame_arr)
+    intensity = cfg.get('crt_intensity', 1.0)
+    scanlines = cfg.get('crt_scanlines', True)
+    curvature = cfg.get('crt_curvature', 0.0)
+    chromatic = cfg.get('crt_chromatic', 0.0)
+    vignette = cfg.get('crt_vignette', 0.0)
+    noise = cfg.get('crt_noise', 0.0)
+    flicker = cfg.get('crt_flicker', 0.0)
+
+    scale = width / 1920.0
+
+    if scanlines:
+        arr = np.array(img).astype(np.float32)
+        gap = max(1, int(2 * intensity * scale))
+        dark = 1.0 - 0.15 * intensity
+        arr[::gap, :, :] *= dark
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+        img = Image.fromarray(arr)
+
+    if chromatic > 0:
+        r, g, b = img.split()[:3]
+        shift = int(max(1, chromatic * intensity * 3 * scale))
+        r = r.transform(r.size, Image.AFFINE, (1, 0, shift, 0, 1, 0), resample=Image.BILINEAR)
+        b = b.transform(b.size, Image.AFFINE, (1, 0, -shift, 0, 1, 0), resample=Image.BILINEAR)
+        img = Image.merge('RGB', (r, g, b))
+
+    if curvature > 0:
+        c = curvature * intensity * 0.1
+        cx, cy = width / 2, height / 2
+        xs = np.arange(width, dtype=np.float32)
+        ys = np.arange(height, dtype=np.float32)
+        nx = (xs - cx) / cx
+        ny = (ys - cy) / cy
+        nxx, nyy = np.meshgrid(nx, ny)
+        r2 = nxx * nxx + nyy * nyy
+        factor = 1.0 + c * r2
+        map_x = (nxx * cx * factor + cx).clip(0, width - 1)
+        map_y = (nyy * cy * factor + cy).clip(0, height - 1)
+        from scipy.ndimage import map_coordinates
+        arr = np.array(img)
+        for ch in range(3):
+            arr[:, :, ch] = map_coordinates(arr[:, :, ch].astype(np.float32),
+                                            [map_y, map_x], order=1, mode='reflect')
+        img = Image.fromarray(arr.astype(np.uint8))
+
+    if vignette > 0:
+        cx, cy = width / 2, height / 2
+        xs = (np.arange(width, dtype=np.float32) - cx) / cx
+        ys = (np.arange(height, dtype=np.float32) - cy) / cy
+        nxx, nyy = np.meshgrid(xs, ys)
+        dist2 = nxx * nxx + nyy * nyy
+        factor = np.clip(dist2 * vignette * intensity, 0, 1)
+        arr = np.array(img).astype(np.float32)
+        arr *= (1.0 - factor[:, :, np.newaxis])
+        img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+
+    if noise > 0:
+        arr = np.array(img).astype(np.float32)
+        n = np.random.normal(0, noise * intensity * 25, arr.shape).astype(np.float32)
+        arr = np.clip(arr + n, 0, 255).astype(np.uint8)
+        img = Image.fromarray(arr)
+
+    if flicker > 0:
+        import random
+        brightness = 1.0 + (random.random() - 0.5) * flicker * intensity * 0.1
+        arr = np.array(img).astype(np.float32)
+        arr = np.clip(arr * brightness, 0, 255).astype(np.uint8)
+        img = Image.fromarray(arr)
 
     return np.array(img)
 
@@ -574,9 +628,10 @@ class LiveFrameRenderer:
         self.fcfg = self.config['fade']
         self.ecfg = self.config.get('effects', {})
 
-        self.font_title = get_font(self.tcfg['font_size'])
-        self.font_sub = get_font(self.tcfg['sub_font_size'])
-        self.font_time = get_font(22)
+        custom_font_family = self.tcfg.get('custom_font_family', None)
+        self.font_title = get_font(self.tcfg['font_size'], custom_font_family)
+        self.font_sub = get_font(self.tcfg['sub_font_size'], custom_font_family)
+        self.font_time = get_font(22, custom_font_family)
 
         self.text_color = hex_to_rgb(self.tcfg['color'])
         self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'])
@@ -623,20 +678,66 @@ class LiveFrameRenderer:
 
         self.smooth_cache = {}
         self.effects_active = any(self.ecfg.get(k) for k in ['bounce', 'shake', 'zoom', 'flash'])
+        self.crt_active = self.ecfg.get('crt', False)
+
+        self._clip_images = []
+        self._clip_enabled = self.config.get('clip_enabled', False)
+        self._clip_interval = self.config.get('clip_interval', 1.0)
+        self._clip_interval_unit = self.config.get('clip_interval_unit', '초')
+        self._clip_random = self.config.get('clip_random', False)
+        if self._clip_enabled:
+            self._load_clips()
 
         self._static_cache = {}
         self._build_static_layers()
 
+    def _load_clips(self):
+        clips_data = self.config.get('clips', [])
+        self._clip_images = []
+        for c in clips_data:
+            fp = c.get('filepath', '')
+            if not fp or not os.path.isfile(fp):
+                continue
+            try:
+                img = Image.open(fp).convert('RGB')
+                img = img.resize((self.width, self.height), Image.LANCZOS)
+                self._clip_images.append(img)
+            except Exception:
+                pass
+
+    def _get_clip_frame(self, t):
+        if not self._clip_images:
+            return None
+        n = len(self._clip_images)
+        if self._clip_random:
+            import hashlib
+            idx = int(hashlib.md5(f"{t:.3f}".encode()).hexdigest(), 16) % n
+        else:
+            if self._clip_interval_unit == '박자':
+                idx = int(t / max(self._clip_interval, 0.1)) % n
+            elif self._clip_interval_unit == '곡별':
+                idx = 0
+                for i, tb in enumerate(self.track_boundaries):
+                    if tb['start'] <= t < tb['end']:
+                        idx = i % n
+                        break
+            else:
+                idx = int(t / max(self._clip_interval, 0.1)) % n
+        return self._clip_images[idx]
+
     def reconfigure(self, config_dict):
-        """오디오 믹싱/트랙 경계는 그대로 두고 시각 설정만 다시 적용한다.
-        (배경 이미지/색상/텍스트/이펙트 등은 config에 따라 달라지므로 다시 계산,
-        트랙 경계·비트 캐시·정규화 기준값은 오디오에서만 나오는 값이라 그대로 재사용)"""
+        """오디오 믹싱/트랙 경계는 그대로 두고 시각 설정만 다시 적용한다."""
         self.config = config_dict
         self.vcfg = self.config['visualizer']
         self.tcfg = self.config['text']
         self.pcfg = self.config['progress_bar']
         self.fcfg = self.config['fade']
         self.ecfg = self.config.get('effects', {})
+
+        custom_font_family = self.tcfg.get('custom_font_family', None)
+        self.font_title = get_font(self.tcfg['font_size'], custom_font_family)
+        self.font_sub = get_font(self.tcfg['sub_font_size'], custom_font_family)
+        self.font_time = get_font(22, custom_font_family)
 
         self.text_color = hex_to_rgb(self.tcfg['color'])
         self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'])
@@ -650,6 +751,16 @@ class LiveFrameRenderer:
         }
         self.smooth_cache = {}
         self.effects_active = any(self.ecfg.get(k) for k in ['bounce', 'shake', 'zoom', 'flash'])
+        self.crt_active = self.ecfg.get('crt', False)
+
+        self._clip_enabled = self.config.get('clip_enabled', False)
+        self._clip_interval = self.config.get('clip_interval', 1.0)
+        self._clip_interval_unit = self.config.get('clip_interval_unit', '초')
+        self._clip_random = self.config.get('clip_random', False)
+        self._clip_images = []
+        if self._clip_enabled:
+            self._load_clips()
+
         self._static_cache = {}
         self._build_static_layers()
 
@@ -795,6 +906,11 @@ class LiveFrameRenderer:
         # 캐시된 정적 레이어(배경+텍스트)를 복사 — 배경생성+텍스트 그리기 비용 0
         frame = Image.fromarray(self._static_cache[a.filename].copy())
 
+        if self._clip_enabled:
+            clip_frame = self._get_clip_frame(t)
+            if clip_frame is not None:
+                frame.paste(clip_frame, (0, 0))
+
         # --- Visualizer ---
         if vcfg['type'] != 'none' and a.stft_magnitudes.size > 0:
             viz_layer = None
@@ -924,6 +1040,9 @@ class LiveFrameRenderer:
             beats = beat_time_cache.get(a.filename, np.array([]))
             frame_arr = apply_beat_effects(frame_arr, t, beats, ecfg, width, height)
 
+        if self.crt_active:
+            frame_arr = apply_crt_effect(frame_arr, ecfg, width, height)
+
         return frame_arr
 
 
@@ -933,7 +1052,7 @@ class LiveFrameRenderer:
 def generate_video(analyses, mixed_audio_path, output_path,
                    width=1920, height=1080, visual_config_path=None,
                    timestamps=None, timestamp_duration=8.0, crossfade_duration=4.0,
-                   frame_progress_callback=None):
+                   frame_progress_callback=None, fps=24):
     print("\n영상 생성 시작...")
 
     if not os.path.isfile(mixed_audio_path):
@@ -943,7 +1062,7 @@ def generate_video(analyses, mixed_audio_path, output_path,
     if audio_clip is None:
         raise RuntimeError(f"오디오 파일을 열 수 없습니다: {mixed_audio_path}")
     total_duration = audio_clip.duration
-    fps = 24
+    fps = fps if fps else 24
 
     renderer = LiveFrameRenderer(
         analyses, width, height, total_duration,
@@ -953,8 +1072,10 @@ def generate_video(analyses, mixed_audio_path, output_path,
     vcfg, fcfg, ecfg = renderer.vcfg, renderer.fcfg, renderer.ecfg
 
     print(f"  비주얼라이저: {vcfg['type']} | 페이드: in={fcfg['fade_in_duration']}s out={fcfg['fade_out_duration']}s")
-    if renderer.effects_active:
+    if renderer.effects_active or renderer.crt_active:
         active_fx = [k for k in ['bounce', 'shake', 'zoom', 'flash'] if ecfg.get(k)]
+        if renderer.crt_active:
+            active_fx.append('crt')
         print(f"  이펙트: {', '.join(active_fx)}")
     print(f"  총 길이: {total_duration:.1f}s | 해상도: {width}x{height} | FPS: {fps}")
 
