@@ -31,3 +31,6 @@ app_icon*.png
 brand_logo_*.png
 brand_splash*.png
 splash.png
+
+# External
+title_generator.py
