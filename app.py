@@ -1,5 +1,5 @@
 """
-Auto Playlist Maker GUI v1.2.1 - Dark theme, D2Coding font, dark/light toggle
+Auto Playlist Maker GUI v1.2.0 - Dark theme, D2Coding font, dark/light toggle
 4단계: 프로젝트+가져오기 → 자동분배 → 음악편집 → 영상편집+렌더링
 """
 
@@ -32,7 +32,7 @@ _PIL_ImageTk = None
 _PIL_ImageDraw = None
 _PIL_ImageFont = None
 video_gen = None
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.0"
 DONATION_URL = "https://toon.at/donate/scenesua"
 
 
