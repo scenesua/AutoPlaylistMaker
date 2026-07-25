@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -21,12 +24,13 @@ jobs:
       - name: Build
         run: .\build_windows_onedir.ps1
         shell: pwsh
-      - name: Upload
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $zip = Get-ChildItem dist\*_windows_x64.zip | Select-Object -First 1
-          gh release upload $env:GITHUB_REF_NAME $zip.FullName --clobber
+          gh release create "${env:GITHUB_REF_NAME}" $zip.FullName --clobber --generate-notes 2>$null
+          gh release upload "${env:GITHUB_REF_NAME}" $zip.FullName --clobber
 
   build-macos:
     runs-on: macos-latest
@@ -42,9 +46,10 @@ jobs:
           pip install pyinstaller
       - name: Build
         run: bash build_mac.sh
-      - name: Upload
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ZIP=$(ls dist/*_macos.zip | head -1)
+          gh release create "${GITHUB_REF_NAME}" "$ZIP" --clobber --generate-notes 2>/dev/null || true
           gh release upload "${GITHUB_REF_NAME}" "$ZIP" --clobber
