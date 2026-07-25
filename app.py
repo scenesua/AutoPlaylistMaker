@@ -2804,7 +2804,7 @@ class Stage3VideoEdit(tk.Frame):
         self.video_codec_var = tk.StringVar(value="자동")
         self.audio_codec_var = tk.StringVar(value="aac")
         self.video_bitrate_var = tk.StringVar(value="5000k")
-        self.audio_bitrate_var = tk.StringVar(value="192k")
+        self.audio_bitrate_var = tk.StringVar(value="320k")
         self.loop_video_var = tk.BooleanVar(value=False)
         self.loop_mode_var = tk.StringVar(value="반복 횟수")
         self.loop_count_var = tk.StringVar(value="1")
@@ -3082,8 +3082,9 @@ class Stage3VideoEdit(tk.Frame):
         styled_label(
             bitrate_row, "영상", size=9, bg=THEME['bg_card']
         ).pack(side=tk.LEFT)
-        styled_entry(
-            bitrate_row, textvariable=self.audio_bitrate_var, width=8
+        styled_option_menu(
+            bitrate_row, self.audio_bitrate_var,
+            ["128k", "192k", "256k", "320k"]
         ).pack(side=tk.LEFT, padx=(8, 2))
         styled_label(
             bitrate_row, "오디오", size=9, bg=THEME['bg_card']
@@ -3907,7 +3908,7 @@ class Stage3VideoEdit(tk.Frame):
         )
         render_audio_codec = self.audio_codec_var.get()
         render_video_bitrate = self.video_bitrate_var.get().strip() or "5000k"
-        render_audio_bitrate = self.audio_bitrate_var.get().strip() or "192k"
+        render_audio_bitrate = self.audio_bitrate_var.get().strip() or "320k"
         normalize_loudness = self.normalize_loudness_var.get()
         render_groups = []
         for group in self.app.video_groups:

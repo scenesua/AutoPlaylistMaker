@@ -150,7 +150,7 @@ def loop_video_to_duration(input_path, output_path, target_seconds, cancel_event
         '-t', f"{float(target_seconds):.3f}",
         '-map', '0:v:0', '-map', '0:a?',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
-        '-c:a', 'aac', '-b:a', '192k',
+        '-c:a', 'aac', '-b:a', '320k',
         '-movflags', '+faststart',
         temp_output,
     ]
@@ -1536,7 +1536,7 @@ def generate_video(analyses, mixed_audio_path, output_path,
                    timestamps=None, timestamp_duration=8.0, crossfade_duration=4.0,
                    frame_progress_callback=None, fps=24,
                    video_codec='auto', audio_codec='aac',
-                   video_bitrate='5000k', audio_bitrate='192k'):
+                   video_bitrate='5000k', audio_bitrate='320k'):
     print("\n영상 생성 시작...")
 
     if not os.path.isfile(mixed_audio_path):
