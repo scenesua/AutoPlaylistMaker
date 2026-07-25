@@ -3,7 +3,7 @@ set -e
 
 cd "$(dirname "$0")"
 
-version="1.2.0"
+version="1.2.1"
 appName="AutoPlaylistMaker_v$version"
 distRoot="./dist"
 bundleDir="$distRoot/$appName.app"

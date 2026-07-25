@@ -1,5 +1,5 @@
 """
-Auto Playlist Maker GUI v1.2.0 - Dark theme, D2Coding font, dark/light toggle
+Auto Playlist Maker GUI v1.2.1 - Dark theme, D2Coding font, dark/light toggle
 4단계: 프로젝트+가져오기 → 자동분배 → 음악편집 → 영상편집+렌더링
 """
 
@@ -57,7 +57,7 @@ _PIL_ImageTk = None
 _PIL_ImageDraw = None
 _PIL_ImageFont = None
 video_gen = None
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 DONATION_URL = "https://toon.at/donate/scenesua"
 
 
@@ -827,6 +827,7 @@ class Stage1Distribute(tk.Frame):
         hdr = tk.Frame(self, bg=THEME['bg_main'])
         hdr.pack(fill=tk.X, padx=24, pady=(14, 0))
         styled_label(hdr, "분배", size=20, bold=True, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_button(hdr, "저장", lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
 
         self._mode_btn_frame = tk.Frame(self, bg=THEME['bg_main'])
         self._mode_btn_frame.pack(fill=tk.X, padx=24, pady=(6, 2))
@@ -1623,6 +1624,7 @@ class Stage2MusicEdit(tk.Frame):
         self.tabs_container = tk.Frame(top, bg=THEME['bg_main'])
         self.tabs_container.pack(side=tk.LEFT)
 
+        styled_button(top, "저장", lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
         styled_button(top, "줌 인", self._zoom_in, padx=6).pack(side=tk.RIGHT, padx=(4, 0))
         styled_button(top, "줌 아웃", self._zoom_out, padx=6).pack(side=tk.RIGHT)
         styled_button(top, "전체 보기", self._zoom_fit, padx=6).pack(side=tk.RIGHT, padx=(0, 4))
@@ -2496,7 +2498,10 @@ class Stage2ClipList(tk.Frame):
         self.build_ui()
 
     def build_ui(self):
-        styled_label(self, "클립 목록", size=20, bold=True, bg=THEME['bg_main']).pack(pady=(14, 2))
+        hdr = tk.Frame(self, bg=THEME['bg_main'])
+        hdr.pack(fill=tk.X, padx=24, pady=(14, 0))
+        styled_label(hdr, "클립 목록", size=20, bold=True, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_button(hdr, "저장", lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
         styled_label(self, "각 그룹별로 이미지/영상을 설정합니다 (전환 간격, 랜덤 등)",
                      size=11, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(pady=(0, 6))
 
@@ -2697,7 +2702,10 @@ class Stage3VideoEdit(tk.Frame):
         self.build_ui()
 
     def build_ui(self):
-        styled_label(self, "영상 편집 + 렌더링", size=20, bold=True, bg=THEME['bg_main']).pack(pady=(14, 2))
+        hdr = tk.Frame(self, bg=THEME['bg_main'])
+        hdr.pack(fill=tk.X, padx=24, pady=(14, 0))
+        styled_label(hdr, "영상 편집 + 렌더링", size=20, bold=True, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_button(hdr, "저장", lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
 
         self.tabs_container = tk.Frame(self, bg=THEME['bg_main'])
         self.tabs_container.pack(pady=(0, 4))
@@ -3684,27 +3692,22 @@ class Stage3VideoEdit(tk.Frame):
         self._start_scrub_play()
 
     def _show_preview_loading(self):
-        """미리보기 캔버스 위에 '로딩 중...' Label 오버레이 표시."""
-        if getattr(self, '_preview_loading_label', None) is None:
-            self._preview_loading_label = tk.Label(
-                self.preview_canvas, text="로딩 중...",
-                font=("D2Coding", 14),
-                fg=THEME.get('fg', '#cccccc'),
-                bg=THEME.get('bg', '#2b2d31'),
-            )
+        """미리보기 캔버스 위에 로딩 오버레이 표시 (텍스트 + 애니메이션 바)."""
         self._hide_preview_loading()
         self.preview_canvas.delete("all")
-        lw, lh = 200, 80
         cw = max(self.preview_canvas.winfo_width(), 640)
         ch = max(self.preview_canvas.winfo_height(), 360)
-        x = (cw - lw) // 2
-        y = (ch - lh) // 2 - 10
-        self._preview_loading_label.place(x=x, y=y, width=lw, height=lh)
+        cx, cy = cw // 2, ch // 2
+        self.preview_canvas.create_text(cx, cy - 20, text="로딩 중...",
+                                        font=("D2Coding", 14),
+                                        fill=THEME.get('fg', '#cccccc'),
+                                        tags="_loading_text")
         bar_w, bar_h = min(300, cw - 80), 6
         bx = (cw - bar_w) // 2
-        by = y + lh + 10
+        by = cy + 10
         self.preview_canvas.create_rectangle(bx, by, bx + bar_w, by + bar_h,
-                                             fill=THEME.get('bg_hover', '#333'), outline='')
+                                             fill=THEME.get('bg_hover', '#333'), outline='',
+                                             tags="_loading_bg")
         self._preview_loading_bar = (bx, by, bar_w, bar_h)
         self._preview_loading_offset = [0.0]
         self.preview_canvas.update_idletasks()
@@ -3715,27 +3718,24 @@ class Stage3VideoEdit(tk.Frame):
         if not getattr(self, '_preview_loading_bar', None):
             return
         bx, by, bar_w, bar_h = self._preview_loading_bar
-        self.preview_canvas.delete("_loading_bar")
+        self.preview_canvas.delete("_loading_seg")
         offset = self._preview_loading_offset[0]
         seg = bar_w * 0.3
         x1 = bx + int(offset * bar_w) % bar_w
         x2 = min(x1 + seg, bx + bar_w)
         self.preview_canvas.create_rectangle(x1, by, x2, by + bar_h,
                                              fill=THEME.get('accent', '#5865f2'), outline='',
-                                             tags="_loading_bar")
+                                             tags="_loading_seg")
         self._preview_loading_offset[0] += 0.04
         self._preview_loading_after = self.after(30, self._animate_preview_loading)
 
     def _hide_preview_loading(self):
-        """로딩 Label 및 애니메이션 제거."""
-        if getattr(self, '_preview_loading_bar', None):
-            self.preview_canvas.delete("_loading_bar")
-            self._preview_loading_bar = None
+        """로딩 오버레이 제거."""
         if getattr(self, '_preview_loading_after', None):
             self.after_cancel(self._preview_loading_after)
             self._preview_loading_after = None
-        if getattr(self, '_preview_loading_label', None):
-            self._preview_loading_label.place_forget()
+        self.preview_canvas.delete("_loading_text", "_loading_bg", "_loading_seg")
+        self._preview_loading_bar = None
 
     def _show_pil_frame_fit(self, pil_img):
         """PIL 이미지를 캔버스 크기에 맞춰, 비율을 망가뜨리지 않고(가로가 남으면
