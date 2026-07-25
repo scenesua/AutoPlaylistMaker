@@ -1,5 +1,5 @@
 """
-Auto Playlist Maker GUI v1.3.0 - Dark theme, D2Coding font, dark/light toggle
+Auto Playlist Maker GUI v1.2.1 - Dark theme, D2Coding font, dark/light toggle
 4단계: 프로젝트+가져오기 → 자동분배 → 음악편집 → 영상편집+렌더링
 """
 
@@ -32,7 +32,7 @@ _PIL_ImageTk = None
 _PIL_ImageDraw = None
 _PIL_ImageFont = None
 video_gen = None
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.2.1"
 DONATION_URL = "https://toon.at/donate/scenesua"
 
 
@@ -3592,6 +3592,8 @@ class Stage3VideoEdit(tk.Frame):
         self._stop_scrub_play()
         self.preview_play_btn.configure(state=tk.DISABLED, text="준비 중...")
         self._preview_status_label.configure(text="오디오 믹싱 중...")
+        self._preview_generation += 1
+        preview_generation = self._preview_generation
 
         def run():
             try:
@@ -3684,8 +3686,13 @@ class Stage3VideoEdit(tk.Frame):
                     self.after(
                         0, lambda img=image: self._show_pil_frame_fit(img)
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(f"[미리보기] 프레임 렌더링 실패: {e}\n{tb}")
+                self.after(0, lambda: self._preview_status_label.configure(
+                    text=f"렌더링 오류: {e}"
+                ))
             finally:
                 self._preview_frame_worker_active = False
                 if self._preview_requested_t is not None:
@@ -3876,6 +3883,11 @@ class Stage3VideoEdit(tk.Frame):
                     a_out = os.path.join(g_dir, "audio.wav")
                     from audio_pipeline import mix_tracks_streaming, normalize_loudness as normalize_audio
                     ffmpeg_exe = video_gen._find_ffmpeg_exe()
+                    if not ffmpeg_exe or not os.path.isfile(ffmpeg_exe):
+                        raise RuntimeError(
+                            "ffmpeg를 찾을 수 없습니다.\n"
+                            "setup.bat을 실행하거나 시스템 PATH에 ffmpeg를 설치하세요."
+                        )
                     _, dur, timestamps = mix_tracks_streaming(
                         ffmpeg_exe, analyses, valid_tracks, a_out, 4.0,
                         cancel_event=self._render_cancel_event,
@@ -3989,15 +4001,20 @@ class Stage3VideoEdit(tk.Frame):
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
+                is_cancel = "취소" in str(e)
                 try:
                     log_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
                     with open(os.path.join(log_dir, "render_error.log"), "w", encoding="utf-8") as ef:
                         ef.write(f"{e}\n\n{tb}\n")
                 except Exception:
                     pass
-                self.after(0, lambda: self.render_status.configure(text=f"오류: {e}"))
-                self.after(0, lambda: self.retry_render_btn.configure(state=tk.NORMAL))
-                self.after(0, lambda: messagebox.showerror("오류", f"{e}\n\n자세한 내용은 render_error.log 확인"))
+                if is_cancel:
+                    self.after(0, lambda: (self.render_status.configure(text="렌더링이 취소되었습니다."),
+                                           self.retry_render_btn.configure(state=tk.NORMAL)))
+                else:
+                    self.after(0, lambda: self.render_status.configure(text=f"오류: {e}"))
+                    self.after(0, lambda: self.retry_render_btn.configure(state=tk.NORMAL))
+                    self.after(0, lambda: messagebox.showerror("오류", f"{e}\n\n자세한 내용은 render_error.log 확인"))
             finally:
                 def _restore():
                     self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")

@@ -1084,7 +1084,7 @@ class LiveFrameRenderer:
 
     def reconfigure(self, config_dict):
         """오디오 믹싱/트랙 경계는 그대로 두고 시각 설정만 다시 적용한다."""
-        self.config = config_dict
+        self.config = merge_visual_config(config_dict)
         self.vcfg = self.config['visualizer']
         self.tcfg = self.config['text']
         self.pcfg = self.config['progress_bar']
