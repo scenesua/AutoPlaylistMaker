@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt 2>$null
+          pip install pyinstaller
+      - name: Build
+        run: .\build_windows_onedir.ps1
+        shell: pwsh
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Get-ChildItem dist\*_windows_x64.zip | Select-Object -First 1
+          gh release create "${env:GITHUB_REF_NAME}" --generate-notes 2>$null
+          gh release upload "${env:GITHUB_REF_NAME}" $zip.FullName --clobber
+
+  build-macos:
+    runs-on: macos-latest
+    needs: build-windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build
+        run: bash build_mac.sh
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ZIP=$(ls dist/*_macos.zip | head -1)
+          gh release upload "${GITHUB_REF_NAME}" "$ZIP" --clobber

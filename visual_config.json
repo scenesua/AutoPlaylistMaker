@@ -1,0 +1,61 @@
+{
+  "_description": "Music Mixer 비주얼 설정 파일",
+  "_usage": "python mixer.py --visual-config visual_config.json --video *.mp3",
+
+  "background": {
+    "image": null,
+    "opacity": 1.0,
+    "blur": 0,
+    "darken": 0.0,
+    "_image_note": "이미지 경로를 넣으면 해당 이미지를 배경으로 사용. null이면 키 기반 그라디언트 생성"
+  },
+
+  "visualizer": {
+    "type": "eq_bars",
+    "_type_options": ["eq_bars", "waveform", "spectrum", "circles", "radial", "none"],
+    "position": "bottom",
+    "_position_options": ["top", "bottom"],
+    "color": "#ffffff",
+    "opacity": 0.85,
+    "bar_count": 64,
+    "height": 120,
+    "smoothing": 0.3,
+    "_smoothing_note": "0.0 = 반응 즉시, 1.0 = 매우 느리게 반응",
+    "mirror": false,
+    "_mirror_note": "true = 상하 대칭으로 표시",
+    "gradient": true,
+    "_gradient_note": "true = 위로 갈수록 투명해지는 그라디언트 효과"
+  },
+
+  "text": {
+    "show_title": true,
+    "show_bpm": true,
+    "show_key": true,
+    "show_camelot": false,
+    "show_time": true,
+    "position": "center",
+    "_position_options": ["top", "center"],
+    "font_size": 42,
+    "sub_font_size": 28,
+    "color": "#ffffff",
+    "shadow": true,
+    "shadow_color": "#000000",
+    "shadow_offset": 3
+  },
+
+  "progress_bar": {
+    "show": true,
+    "position": "bottom",
+    "_position_options": ["top", "bottom"],
+    "height": 4,
+    "color": "#ffffff",
+    "background_color": "#333333",
+    "margin": 30
+  },
+
+  "fade": {
+    "fade_in_duration": 2.0,
+    "fade_out_duration": 3.0,
+    "_note": "0.0 = 페이드 없음"
+  }
+}

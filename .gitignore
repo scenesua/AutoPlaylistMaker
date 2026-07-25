@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.spec
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temp
+*.log
+*.npz
+.env
+
+# Build scripts & temp
+*.pid
+build_*.ps1
+test_artifacts/
+
+# Icons & logos
+*.ico
+app_icon*.png
+brand_logo_*.png
+brand_splash*.png
+splash.png
+
+# External
+title_generator.py

@@ -1,0 +1,91 @@
+#!/bin/bash
+set -e
+
+cd "$(dirname "$0")"
+
+version="1.2.0"
+appName="AutoPlaylistMaker_v$version"
+distRoot="./dist"
+bundleDir="$distRoot/$appName.app"
+output="$bundleDir/Contents/MacOS/$appName"
+zipOutput="$distRoot/${appName}_macos.zip"
+
+pythonDlls=$(python3 -c "import sys; print(sys.prefix)")
+
+arguments=(
+    "--noconfirm"
+    "--clean"
+    "--onedir"
+    "--windowed"
+    "--name" "$appName"
+    "--add-data" "app_icon.png:."
+    "--add-data" "visual_config.json:."
+    "--collect-all" "imageio_ffmpeg"
+    "--collect-all" "tkinterdnd2"
+    "--copy-metadata" "imageio"
+    "--copy-metadata" "imageio-ffmpeg"
+    "--copy-metadata" "moviepy"
+    "--copy-metadata" "librosa"
+    "--copy-metadata" "soundfile"
+    "--exclude-module" "torch"
+    "--exclude-module" "torchvision"
+    "--exclude-module" "torchaudio"
+    "--exclude-module" "tensorflow"
+    "--exclude-module" "sklearn"
+    "--exclude-module" "pandas"
+    "--exclude-module" "matplotlib"
+    "--exclude-module" "IPython"
+    "--exclude-module" "notebook"
+    "--hidden-import" "analyzer"
+    "--hidden-import" "transition"
+    "--hidden-import" "video_gen"
+    "--hidden-import" "project"
+    "--hidden-import" "distributor"
+    "--hidden-import" "audio_preview"
+    "--hidden-import" "audio_pipeline"
+    "--hidden-import" "render_jobs"
+    "--hidden-import" "ui_state"
+    "--hidden-import" "repeat_settings"
+    "--hidden-import" "font_combo"
+    "app.py"
+)
+
+python3 -m PyInstaller "${arguments[@]}"
+
+if [ $? -ne 0 ]; then
+    echo "PyInstaller build failed"
+    exit 1
+fi
+
+if [ ! -d "$bundleDir" ]; then
+    echo "Build completed without .app bundle: $bundleDir"
+    exit 1
+fi
+
+# Copy tcl/tk data if missing
+internalDir="$bundleDir/Contents/Resources"
+tclLib=$(python3 -c "import tkinter; import os; print(os.path.dirname(os.__file__))")
+tclData="$tclLib/tcl8.6"
+tkData="$tclLib/tk8.6"
+if [ -d "$tclData" ] && [ ! -d "$internalDir/_tcl_data" ]; then
+    cp -R "$tclData" "$internalDir/_tcl_data"
+    echo "Copied tcl data"
+fi
+if [ -d "$tkData" ] && [ ! -d "$internalDir/_tk_data" ]; then
+    cp -R "$tkData" "$internalDir/_tk_data"
+    echo "Copied tk data"
+fi
+
+# Zip the .app bundle
+if [ -f "$zipOutput" ]; then
+    rm "$zipOutput"
+fi
+ditto -c -k --sequesterRsrc --keepParent "$bundleDir" "$zipOutput"
+
+bundleSize=$(du -sm "$bundleDir" | cut -f1)
+fileCount=$(find "$bundleDir" -type f | wc -l)
+zipSize=$(du -sm "$zipOutput" | cut -f1)
+
+echo "Built Auto Playlist Maker v${version} .app"
+echo "Bundle: ${bundleDir} (${bundleSize} MB, ${fileCount} files)"
+echo "ZIP: ${zipOutput} (${zipSize} MB)"
