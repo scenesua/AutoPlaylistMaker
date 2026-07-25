@@ -2,12 +2,16 @@
 
 import os
 import subprocess
+import sys
+
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 
 
 def _run(command, cancel_event=None):
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace",
+        creationflags=_NO_WINDOW,
     )
     while process.poll() is None:
         if cancel_event is not None and cancel_event.wait(0.1):

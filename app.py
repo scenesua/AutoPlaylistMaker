@@ -11,6 +11,31 @@ import time
 import shutil
 import copy
 import webbrowser
+
+if sys.platform == "win32" and getattr(sys, "frozen", False):
+    import subprocess as _sp
+    _orig_popen = _sp.Popen.__init__
+    def _silent_popen(self, *args, **kwargs):
+        kwargs.setdefault('creationflags', 0)
+        kwargs['creationflags'] |= _sp.CREATE_NO_WINDOW
+        _orig_popen(self, *args, **kwargs)
+    _sp.Popen.__init__ = _silent_popen
+
+    _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    _dll_dir = os.path.join(_exe_dir, "_internal")
+    if os.path.isdir(_dll_dir) and hasattr(os, "add_dll_directory"):
+        os.add_dll_directory(_dll_dir)
+        os.add_dll_directory(_exe_dir)
+    _path = os.environ.get("PATH", "")
+    if _exe_dir not in _path:
+        os.environ["PATH"] = _exe_dir + os.pathsep + _dll_dir + os.pathsep + _path
+    _tcl_dir = os.path.join(_dll_dir, "_tcl_data")
+    _tk_dir = os.path.join(_dll_dir, "_tk_data")
+    if os.path.isdir(_tcl_dir) and "TCL_LIBRARY" not in os.environ:
+        os.environ["TCL_LIBRARY"] = _tcl_dir
+    if os.path.isdir(_tk_dir) and "TK_LIBRARY" not in os.environ:
+        os.environ["TK_LIBRARY"] = _tk_dir
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from tkinter import font as tkfont
@@ -3594,21 +3619,33 @@ class Stage3VideoEdit(tk.Frame):
         self._preview_status_label.configure(text="오디오 믹싱 중...")
         self._preview_generation += 1
         preview_generation = self._preview_generation
+        self._show_preview_loading()
+
+        _log_path = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_preview.log")
+        def _plog(msg):
+            try:
+                with open(_log_path, "a", encoding="utf-8") as _lf:
+                    _lf.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            except Exception:
+                pass
 
         def run():
+            _plog(f"=== 미리보기 시작 ===")
+            _plog(f"analyses={len(analyses)}, tracks_data={len(tracks_data)}, pw={pw}, ph={ph}")
             try:
                 import tempfile
                 tmp_audio = os.path.join(tempfile.gettempdir(), "_livepreview_audio.wav")
-                # 오디오 믹싱 자체는 그대로 필요하지만(길이·경계 계산용), 영상은
-                # 더 이상 ffmpeg로 인코딩하지 않고 프레임을 직접 그려서 캔버스에
-                # 표시하므로 이 뒤가 훨씬 빨라진다.
+                _plog("create_mixed_audio 호출...")
                 _, dur, timestamps = _create_mixed_audio(analyses, tracks_data, tmp_audio, 4.0)
+                _plog(f"오디오 믹싱 완료: dur={dur}, timestamps={len(timestamps)}")
 
+                _plog("LiveFrameRenderer 생성 중...")
                 renderer = video_gen.LiveFrameRenderer(
                     analyses, pw, ph, dur,
                     timestamps=timestamps, crossfade_duration=4.0,
                     config_dict=config,
                 )
+                _plog("LiveFrameRenderer 생성 완료")
 
                 self.after(
                     0,
@@ -3617,7 +3654,10 @@ class Stage3VideoEdit(tk.Frame):
                     ),
                 )
             except Exception as e:
+                import traceback
+                _plog(f"ERROR: {e}\n{traceback.format_exc()}")
                 self.after(0, lambda: (
+                    self._hide_preview_loading(),
                     messagebox.showerror("오류", f"미리보기 준비 실패:\n{e}"),
                     self.preview_play_btn.configure(state=tk.NORMAL, text="▶ 실시간 재생"),
                     self._preview_status_label.configure(text="실패"),
@@ -3631,6 +3671,7 @@ class Stage3VideoEdit(tk.Frame):
             and generation != self._preview_generation
         ):
             return
+        self._hide_preview_loading()
         self._live_renderer = renderer
         self._live_duration = duration
         self.scrub_scale.state(['!disabled'])
@@ -3641,6 +3682,60 @@ class Stage3VideoEdit(tk.Frame):
         self._preview_status_label.configure(text=f"준비됨 (Mix {idx+1}, 총 {duration:.1f}초) — 슬라이더로 탐색 또는 재생")
         self.preview_play_btn.configure(state=tk.NORMAL, text="■ 정지", command=self._stop_scrub_play)
         self._start_scrub_play()
+
+    def _show_preview_loading(self):
+        """미리보기 캔버스 위에 '로딩 중...' Label 오버레이 표시."""
+        if getattr(self, '_preview_loading_label', None) is None:
+            self._preview_loading_label = tk.Label(
+                self.preview_canvas, text="로딩 중...",
+                font=("D2Coding", 14),
+                fg=THEME.get('fg', '#cccccc'),
+                bg=THEME.get('bg', '#2b2d31'),
+            )
+        self._hide_preview_loading()
+        self.preview_canvas.delete("all")
+        lw, lh = 200, 80
+        cw = max(self.preview_canvas.winfo_width(), 640)
+        ch = max(self.preview_canvas.winfo_height(), 360)
+        x = (cw - lw) // 2
+        y = (ch - lh) // 2 - 10
+        self._preview_loading_label.place(x=x, y=y, width=lw, height=lh)
+        bar_w, bar_h = min(300, cw - 80), 6
+        bx = (cw - bar_w) // 2
+        by = y + lh + 10
+        self.preview_canvas.create_rectangle(bx, by, bx + bar_w, by + bar_h,
+                                             fill=THEME.get('bg_hover', '#333'), outline='')
+        self._preview_loading_bar = (bx, by, bar_w, bar_h)
+        self._preview_loading_offset = [0.0]
+        self.preview_canvas.update_idletasks()
+        self._animate_preview_loading()
+
+    def _animate_preview_loading(self):
+        """프로그레스 바 애니메이션 (좌→우 반복)."""
+        if not getattr(self, '_preview_loading_bar', None):
+            return
+        bx, by, bar_w, bar_h = self._preview_loading_bar
+        self.preview_canvas.delete("_loading_bar")
+        offset = self._preview_loading_offset[0]
+        seg = bar_w * 0.3
+        x1 = bx + int(offset * bar_w) % bar_w
+        x2 = min(x1 + seg, bx + bar_w)
+        self.preview_canvas.create_rectangle(x1, by, x2, by + bar_h,
+                                             fill=THEME.get('accent', '#5865f2'), outline='',
+                                             tags="_loading_bar")
+        self._preview_loading_offset[0] += 0.04
+        self._preview_loading_after = self.after(30, self._animate_preview_loading)
+
+    def _hide_preview_loading(self):
+        """로딩 Label 및 애니메이션 제거."""
+        if getattr(self, '_preview_loading_bar', None):
+            self.preview_canvas.delete("_loading_bar")
+            self._preview_loading_bar = None
+        if getattr(self, '_preview_loading_after', None):
+            self.after_cancel(self._preview_loading_after)
+            self._preview_loading_after = None
+        if getattr(self, '_preview_loading_label', None):
+            self._preview_loading_label.place_forget()
 
     def _show_pil_frame_fit(self, pil_img):
         """PIL 이미지를 캔버스 크기에 맞춰, 비율을 망가뜨리지 않고(가로가 남으면
@@ -3854,16 +3949,31 @@ class Stage3VideoEdit(tk.Frame):
             self._sync_group_bg(save=False)
             return
 
+        _log_path = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_render.log")
+        def _rlog(msg):
+            try:
+                with open(_log_path, "a", encoding="utf-8") as _lf:
+                    _lf.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            except Exception:
+                pass
+
         def run():
+            _rlog(f"=== 렌더 시작: {len(render_groups)}개 그룹 ===")
+            _rlog(f"out_dir={out_dir}")
             try:
                 total_groups = len(render_groups)
                 self.after(0, lambda t=total_groups: self._render_set_progress(0, t, 0))
                 for gi, g in enumerate(render_groups):
+                    _rlog(f"--- 그룹 {gi} ---")
                     if self._render_cancel_event.is_set():
                         raise RuntimeError("사용자가 렌더링을 취소했습니다.")
                     tracks = g.get('tracks', [])
-                    if not tracks: continue
+                    _rlog(f"  tracks 수: {len(tracks)}")
+                    if not tracks:
+                        _rlog("  tracks 비어있음 → skip")
+                        continue
                     if skip_completed and self._render_job.is_completed(gi):
+                        _rlog("  이전 완료본 유지")
                         self.after(
                             0, lambda ii=gi: self._update_queue(ii, "기존 완료본 유지")
                         )
@@ -3875,7 +3985,13 @@ class Stage3VideoEdit(tk.Frame):
                         if t.get('analysis') and t.get('filepath')
                     ]
                     analyses = [t['analysis'] for t in valid_tracks]
-                    if not analyses: continue
+                    _rlog(f"  valid_tracks: {len(valid_tracks)}/{len(tracks)}")
+                    if not valid_tracks:
+                        for ti, t in enumerate(tracks):
+                            _rlog(f"    track {ti}: analysis={bool(t.get('analysis'))}, filepath={t.get('filepath', '<missing>')}")
+                    if not analyses:
+                        _rlog("  분석 결과 없음 → skip")
+                        continue
 
                     g_dir = os.path.join(out_dir, f"mix_{gi+1}")
                     os.makedirs(g_dir, exist_ok=True)
@@ -3888,10 +4004,13 @@ class Stage3VideoEdit(tk.Frame):
                             "ffmpeg를 찾을 수 없습니다.\n"
                             "setup.bat을 실행하거나 시스템 PATH에 ffmpeg를 설치하세요."
                         )
+                    _rlog(f"  ffmpeg: {ffmpeg_exe}")
+                    _rlog("  mix_tracks_streaming 호출...")
                     _, dur, timestamps = mix_tracks_streaming(
                         ffmpeg_exe, analyses, valid_tracks, a_out, 4.0,
                         cancel_event=self._render_cancel_event,
                     )
+                    _rlog(f"  믹싱 완료: dur={dur}, audio exists={os.path.isfile(a_out)}")
                     if normalize_loudness:
                         self.after(
                             0, lambda ii=gi: self._update_queue(ii, "음량 정규화 중...")
@@ -3930,6 +4049,7 @@ class Stage3VideoEdit(tk.Frame):
                         ))
 
                     v_out = os.path.join(g_dir, f"mix_{gi+1}.mp4")
+                    _rlog(f"  generate_video 시작: {v_out}")
                     _generate_video(analyses, a_out, v_out, width=w, height=h,
                                    visual_config_path=vc, timestamps=timestamps,
                                    crossfade_duration=4.0,
@@ -3939,6 +4059,7 @@ class Stage3VideoEdit(tk.Frame):
                                    audio_codec=render_audio_codec,
                                    video_bitrate=render_video_bitrate,
                                    audio_bitrate=render_audio_bitrate)
+                    _rlog(f"  영상 생성 완료: {os.path.isfile(v_out)}")
 
                     txt_path = os.path.join(g_dir, "timestamps.txt")
                     self._save_timestamps_txt(txt_path, timestamps, dur)
@@ -3984,6 +4105,7 @@ class Stage3VideoEdit(tk.Frame):
                     )
                     self.after(0, lambda ii=gi, tt=total_groups: self._render_set_progress(ii+1, tt, (ii+1)/max(tt,1)))
 
+                _rlog("=== 렌더 루프 종료 ===")
                 if self.app.project and self.app.project.project_dir:
                     self.app.project.target_duration = self.app.stages[0].get_target_seconds()
                     self.app.project.tolerance = self.app.stages[0].get_tolerance()

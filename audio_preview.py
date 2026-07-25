@@ -2,8 +2,11 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 import threading
+
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 
 
 class AudioPreviewPlayer:
@@ -43,7 +46,7 @@ class AudioPreviewPlayer:
                     )
                 command += ['-af', ",".join(filters)]
                 command += ['-ac', '2', '-ar', '44100', wav_path]
-                result = subprocess.run(command, capture_output=True, text=True)
+                result = subprocess.run(command, capture_output=True, text=True, creationflags=_NO_WINDOW)
                 if result.returncode:
                     raise RuntimeError(result.stderr.strip() or "미리듣기 변환 실패")
                 if generation != self._generation:

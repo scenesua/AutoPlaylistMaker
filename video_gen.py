@@ -13,6 +13,8 @@ import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops
 from moviepy import AudioFileClip
 
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+
 
 class RenderCancelledError(RuntimeError):
     """Raised by a progress callback to stop encoding without fallback."""
@@ -102,6 +104,7 @@ def _detect_gpu_encoder():
 
         result = subprocess.run(
             [ffmpeg_exe, '-encoders'], capture_output=True, text=True, timeout=10,
+            creationflags=_NO_WINDOW,
         )
         encoders = result.stdout
 
@@ -155,6 +158,7 @@ def loop_video_to_duration(input_path, output_path, target_seconds, cancel_event
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace',
+            creationflags=_NO_WINDOW,
         )
         while process.poll() is None:
             if cancel_event is not None and cancel_event.wait(0.1):
@@ -206,6 +210,7 @@ def loop_video_repetitions(
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace',
+            creationflags=_NO_WINDOW,
         )
         while process.poll() is None:
             if cancel_event is not None and cancel_event.wait(0.1):
@@ -1618,6 +1623,7 @@ def generate_video(analyses, mixed_audio_path, output_path,
         process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            creationflags=_NO_WINDOW,
         )
         try:
             for frame_index in range(_total_frames):

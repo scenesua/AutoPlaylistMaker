@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
 $version = "1.2.0"
 $appName = "AutoPlaylistMaker_v$version"
@@ -18,7 +19,6 @@ $arguments = @(
     "--windowed",
     "--name", $appName,
     "--icon", "app_icon.ico",
-    "--splash", "brand_splash.png",
     "--add-data", "app_icon.ico;.",
     "--add-data", "app_icon.png;.",
     "--add-data", "visual_config.json;.",
@@ -62,6 +62,33 @@ if ($LASTEXITCODE -ne 0) {
 if (-not (Test-Path -LiteralPath $output)) {
     throw "Build completed without output: $output"
 }
+
+$internalDir = Join-Path $bundleDir "_internal"
+foreach ($dll in @($tclDll, $tkDll)) {
+    $destInternal = Join-Path $internalDir (Split-Path $dll -Leaf)
+    $destRoot = Join-Path $bundleDir (Split-Path $dll -Leaf)
+    Copy-Item -LiteralPath $dll -Destination $destInternal -Force
+    Copy-Item -LiteralPath $dll -Destination $destRoot -Force
+    Write-Host ("Copied {0} to _internal and root" -f (Split-Path $dll -Leaf))
+}
+
+$tclRoot = Join-Path (python -c "import sys; print(sys.prefix)") "tcl"
+$tclDataSrc = Join-Path $tclRoot "tcl8.6"
+$tkDataSrc = Join-Path $tclRoot "tk8.6"
+$tclDataDst = Join-Path $internalDir "_tcl_data"
+$tkDataDst = Join-Path $internalDir "_tk_data"
+if (Test-Path -LiteralPath $tclDataSrc) {
+    if (-not (Test-Path -LiteralPath $tclDataDst)) {
+        Copy-Item -LiteralPath $tclDataSrc -Destination $tclDataDst -Recurse -Force
+        Write-Host "Copied tcl8.6 -> _tcl_data"
+    } else { Write-Host "_tcl_data already exists" }
+} else { Write-Host "WARNING: tcl8.6 not found at $tclDataSrc" }
+if (Test-Path -LiteralPath $tkDataSrc) {
+    if (-not (Test-Path -LiteralPath $tkDataDst)) {
+        Copy-Item -LiteralPath $tkDataSrc -Destination $tkDataDst -Recurse -Force
+        Write-Host "Copied tk8.6 -> _tk_data"
+    } else { Write-Host "_tk_data already exists" }
+} else { Write-Host "WARNING: tk8.6 not found at $tkDataSrc" }
 
 if (Test-Path -LiteralPath $zipOutput) {
     Remove-Item -LiteralPath $zipOutput -Force
