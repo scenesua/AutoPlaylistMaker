@@ -29,11 +29,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $zip = Get-ChildItem dist\*_windows_x64.zip | Select-Object -First 1
-          gh release create "${env:GITHUB_REF_NAME}" $zip.FullName --clobber --generate-notes 2>$null
+          gh release create "${env:GITHUB_REF_NAME}" --generate-notes 2>$null
           gh release upload "${env:GITHUB_REF_NAME}" $zip.FullName --clobber
 
   build-macos:
     runs-on: macos-latest
+    needs: build-windows
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,5 +52,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ZIP=$(ls dist/*_macos.zip | head -1)
-          gh release create "${GITHUB_REF_NAME}" "$ZIP" --clobber --generate-notes 2>/dev/null || true
           gh release upload "${GITHUB_REF_NAME}" "$ZIP" --clobber
