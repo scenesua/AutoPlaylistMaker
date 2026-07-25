@@ -11,6 +11,21 @@ import time
 import shutil
 import copy
 import webbrowser
+import traceback
+import datetime
+
+_log_lock = threading.Lock()
+def _log_error(context, exc=None):
+    try:
+        log_dir = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        with _log_lock:
+            with open(os.path.join(log_dir, "error.log"), "a", encoding="utf-8") as f:
+                f.write(f"\n[{datetime.datetime.now().isoformat()}] {context}\n")
+                if exc:
+                    f.write(traceback.format_exc())
+    except Exception:
+        pass
 
 if sys.platform == "win32" and getattr(sys, "frozen", False):
     import subprocess as _sp
@@ -44,7 +59,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 _loaded = False
 _analyze_track = None
-_create_mixed_audio = None
 _load_audio_pydub = None
 _generate_video = None
 _load_visual_config = None
@@ -85,7 +99,7 @@ def apply_window_icon(window):
 
 
 def _load_heavy_modules():
-    global _loaded, _analyze_track, _create_mixed_audio, _load_audio_pydub
+    global _loaded, _analyze_track, _load_audio_pydub
     global _generate_video, _load_visual_config, _Project
     global _distribute_tracks, _get_distribution_summary
     global _np, _PIL_Image, _PIL_ImageTk, _PIL_ImageDraw, _PIL_ImageFont
@@ -93,7 +107,7 @@ def _load_heavy_modules():
     import numpy as _numpy
     from PIL import Image as PILImage, ImageTk as PILImageTk, ImageDraw as PILImageDraw, ImageFont as PILImageFont
     from analyzer import analyze_track as _at
-    from transition import create_mixed_audio as _cma, load_audio_pydub as _lap
+    from transition import load_audio_pydub as _lap
     import video_gen as _video_gen_mod
     from video_gen import generate_video as _gv, load_visual_config as _lvc
     from project import Project as _Proj
@@ -104,7 +118,6 @@ def _load_heavy_modules():
     _PIL_ImageDraw = PILImageDraw
     _PIL_ImageFont = PILImageFont
     _analyze_track = _at
-    _create_mixed_audio = _cma
     _load_audio_pydub = _lap
     _generate_video = _gv
     video_gen = _video_gen_mod
@@ -3599,29 +3612,13 @@ class Stage3VideoEdit(tk.Frame):
             messagebox.showwarning("해상도 오류", str(error))
             return
 
-        analyses = []
-        tracks_data = []
-        for t in tracks:
-            if not t.get('analysis'):
-                continue
-            fp = t.get('filepath', '') or (t.get('track', {}).get('filepath', '') if isinstance(t.get('track'), dict) else getattr(t.get('track'), 'filepath', ''))
-            if not fp:
-                continue
-            samples, sr = _load_audio_pydub(fp)
-            ts_val = t.get('trim_start', 0)
-            te_val = t.get('trim_end', 0)
-            dur_val = t.get('duration', len(samples) / sr)
-            if te_val <= 0:
-                te_val = dur_val
-            if ts_val > 0 or te_val < dur_val:
-                s_s = int(ts_val * sr)
-                e_s = int(te_val * sr)
-                samples = samples[s_s:e_s]
-            tracks_data.append((samples, sr))
-            analyses.append(t['analysis'])
-
-        if not tracks_data:
+        valid_tracks = [
+            t for t in tracks
+            if t.get('analysis') and t.get('filepath')
+        ]
+        if not valid_tracks:
             return
+        analyses = [t['analysis'] for t in valid_tracks]
 
         self._stop_scrub_play()
         self.preview_play_btn.configure(state=tk.DISABLED, text="준비 중...")
@@ -3644,8 +3641,12 @@ class Stage3VideoEdit(tk.Frame):
             try:
                 import tempfile
                 tmp_audio = os.path.join(tempfile.gettempdir(), "_livepreview_audio.wav")
-                _plog("create_mixed_audio 호출...")
-                _, dur, timestamps = _create_mixed_audio(analyses, tracks_data, tmp_audio, 4.0)
+                _plog("mix_tracks_streaming 호출...")
+                from audio_pipeline import mix_tracks_streaming
+                ffmpeg_exe = video_gen._find_ffmpeg_exe()
+                if not ffmpeg_exe or not os.path.isfile(ffmpeg_exe):
+                    raise RuntimeError("ffmpeg를 찾을 수 없습니다.\nsetup.bat을 실행하거나 시스템 PATH에 ffmpeg를 설치하세요.")
+                _, dur, timestamps = mix_tracks_streaming(ffmpeg_exe, analyses, valid_tracks, tmp_audio, 4.0)
                 _plog(f"오디오 믹싱 완료: dur={dur}, timestamps={len(timestamps)}")
 
                 _plog("LiveFrameRenderer 생성 중...")
@@ -4506,8 +4507,8 @@ class AutoPlaylistMakerApp:
 
         try:
             self.stages[idx].refresh()
-        except:
-            pass
+        except Exception as e:
+            _log_error("show_stage.refresh", e)
 
         for i, s in enumerate(self.stages):
             if i == idx:
@@ -4516,8 +4517,8 @@ class AutoPlaylistMakerApp:
                 def _defer_refresh(panel=s):
                     try:
                         panel.refresh()
-                    except:
-                        pass
+                    except Exception as e:
+                        _log_error(f"show_stage.deferred_refresh", e)
                 self.root.after(50, _defer_refresh)
 
     def enable_next(self, enabled=True):
@@ -4796,10 +4797,9 @@ def main():
 
     _load_heavy_modules_step(splash, "분석 엔진 로딩 중...", 0.35)
     from analyzer import analyze_track as _at
-    from transition import create_mixed_audio as _cma, load_audio_pydub as _lap
-    global _analyze_track, _create_mixed_audio, _load_audio_pydub
+    from transition import load_audio_pydub as _lap
+    global _analyze_track, _load_audio_pydub
     _analyze_track = _at
-    _create_mixed_audio = _cma
     _load_audio_pydub = _lap
 
     _load_heavy_modules_step(splash, "영상 엔진 로딩 중...", 0.55)

@@ -112,10 +112,17 @@ class Project:
             for item in self.all_files
             if item.get('original') and item.get('backup')
         }
+        seen_this_call = {}
         for fp in filepaths:
             if not os.path.exists(fp):
                 continue
             source = os.path.abspath(fp)
+            key = os.path.normcase(source)
+
+            if key in seen_this_call:
+                backed_up.append(seen_this_call[key])
+                continue
+
             ext = os.path.splitext(fp)[1].lower()
             if ext in AUDIO_EXTS:
                 dest_dir = os.path.join(self.project_dir, "audio")
@@ -126,9 +133,10 @@ class Project:
             else:
                 continue
 
-            old = previous.get(os.path.normcase(source))
+            old = previous.get(key)
             if old and os.path.isfile(old['backup']):
                 backed_up.append(old)
+                seen_this_call[key] = old
                 continue
 
             dest = os.path.join(dest_dir, os.path.basename(fp))
@@ -140,14 +148,16 @@ class Project:
 
             if not os.path.exists(dest) or not os.path.samefile(source, dest):
                 shutil.copy2(source, dest)
-            backed_up.append({
+            entry = {
                 'original': source,
                 'backup': dest,
                 'type': (
                     'audio' if ext in AUDIO_EXTS
                     else ('image' if ext in IMAGE_EXTS else 'video')
                 ),
-            })
+            }
+            backed_up.append(entry)
+            seen_this_call[key] = entry
 
         self.all_files = backed_up
         return backed_up

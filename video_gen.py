@@ -7,6 +7,7 @@ import json
 import colorsys
 import math
 import subprocess
+import threading
 import shutil
 import copy
 import soundfile as sf
@@ -1625,6 +1626,14 @@ def generate_video(analyses, mixed_audio_path, output_path,
             stderr=subprocess.PIPE,
             creationflags=_NO_WINDOW,
         )
+        stderr_chunks = []
+        stderr_lock = threading.Lock()
+        def _drain_stderr():
+            for line in iter(process.stderr.readline, b''):
+                with stderr_lock:
+                    stderr_chunks.append(line)
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
         try:
             for frame_index in range(_total_frames):
                 frame = active_renderer.render_frame(frame_index / fps)
@@ -1632,10 +1641,12 @@ def generate_video(analyses, mixed_audio_path, output_path,
                 if frame_progress_callback:
                     frame_progress_callback(frame_index + 1, _total_frames)
             process.stdin.close()
-            stderr = process.stderr.read().decode('utf-8', errors='replace')
             return_code = process.wait()
+            stderr_thread.join(timeout=5)
+            with stderr_lock:
+                stderr_text = b''.join(stderr_chunks).decode('utf-8', errors='replace')
             if return_code:
-                raise RuntimeError(stderr.strip() or "FFmpeg 영상 인코딩 실패")
+                raise RuntimeError(stderr_text.strip() or "FFmpeg 영상 인코딩 실패")
             os.replace(temp_output, output_path)
         except Exception:
             if process.poll() is None:
@@ -1651,6 +1662,8 @@ def generate_video(analyses, mixed_audio_path, output_path,
                     pass
             raise
         finally:
+            if stderr_thread.is_alive():
+                stderr_thread.join(timeout=2)
             for stream in (process.stdin, process.stderr):
                 if stream and not stream.closed:
                     try:

@@ -1,6 +1,7 @@
 """Streaming FFmpeg audio pipeline for long playlist renders."""
 
 import os
+import json
 import subprocess
 import sys
 
@@ -115,12 +116,44 @@ def normalize_loudness(
     ffmpeg_exe, input_path, output_path, target_lufs=-14.0,
     true_peak=-1.5, cancel_event=None,
 ):
-    """Normalize perceived loudness and constrain true peak for publishing."""
-    command = [
+    """2-pass EBU R128 loudness normalization using ffmpeg loudnorm.
+
+    Pass 1 measures the input loudness/true-peak/LRA/threshold.
+    Pass 2 applies correction using measured_* params for accurate output.
+    """
+    measure_cmd = [
+        ffmpeg_exe, "-hide_banner", "-i", input_path,
+        "-af", f"loudnorm=I={target_lufs}:TP={true_peak}:LRA=11:print_format=json",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(
+        measure_cmd, capture_output=True, text=True, encoding="utf-8",
+        errors="replace",
+        creationflags=_NO_WINDOW,
+    )
+    stderr_text = result.stderr
+    json_start = stderr_text.rfind("{")
+    json_end = stderr_text.rfind("}") + 1
+    if json_start == -1 or json_end <= json_start:
+        raise RuntimeError(
+            "loudnorm 측정 실패: ffmpeg 출력에서 JSON을 찾을 수 없음\n"
+            + stderr_text[-2000:]
+        )
+    measured = json.loads(stderr_text[json_start:json_end])
+
+    correct_cmd = [
         ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y",
         "-i", input_path,
-        "-af", f"loudnorm=I={target_lufs}:TP={true_peak}:LRA=11",
+        "-af", (
+            f"loudnorm=I={target_lufs}:TP={true_peak}:LRA=11:"
+            f"measured_I={measured['input_i']}:"
+            f"measured_TP={measured['input_tp']}:"
+            f"measured_LRA={measured['input_lra']}:"
+            f"measured_thresh={measured['input_thresh']}:"
+            f"offset={measured['target_offset']}:"
+            f"linear=true"
+        ),
         "-c:a", "pcm_s16le", output_path,
     ]
-    _run(command, cancel_event)
+    _run(correct_cmd, cancel_event)
     return output_path
