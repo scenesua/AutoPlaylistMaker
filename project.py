@@ -263,6 +263,15 @@ class Project:
                         td['mode'] = a.mode
                         td['camelot'] = a.camelot
                         td['duration'] = round(a.duration, 1)
+                        fp = track_info.get('filepath', '')
+                        if fp:
+                            absp = os.path.abspath(fp)
+                            if absp not in data['track_analyses']:
+                                data['track_analyses'][absp] = {
+                                    'filepath': fp, 'filename': track_info.get('filename', ''),
+                                    'bpm': round(a.bpm, 1), 'key': a.key, 'mode': a.mode,
+                                    'camelot': a.camelot, 'duration': round(a.duration, 2),
+                                }
                     group_data['tracks'].append(td)
                 for clip_info in vg.get('clips', []):
                     group_data['clips'].append({
@@ -338,6 +347,13 @@ class Project:
             analysis = self.track_analyses.get(old_path)
             if analysis and resolved:
                 self.track_analyses[os.path.abspath(resolved)] = analysis
+
+        for group in self.video_groups:
+            for track in group.get('tracks', []):
+                if 'analysis' not in track:
+                    a = self.get_analysis_for(track.get('filepath', ''))
+                    if a:
+                        track['analysis'] = a
 
         return data
 
