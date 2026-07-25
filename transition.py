@@ -10,7 +10,10 @@ def load_audio_pydub(filepath, target_sr=22050):
     audio = AudioSegment.from_file(filepath)
     audio = audio.set_frame_rate(target_sr).set_channels(1)
     samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
-    samples = samples / (np.iinfo(np.int16).max + 1)
+    # pydub may return 8/16/32-bit PCM depending on the decoder. Normalizing
+    # every input as int16 clips or amplifies non-16-bit sources.
+    scale = float(1 << (8 * audio.sample_width - 1))
+    samples = samples / scale
     return samples, target_sr
 
 
@@ -22,6 +25,20 @@ def pydub_to_segment(samples, sr):
         sample_width=2,
         channels=1,
     )
+
+
+def apply_edge_fades(samples, sr, fade_duration=0.01):
+    """Apply short equal-power edge fades to prevent trim click noise."""
+    if fade_duration <= 0 or len(samples) < 2:
+        return samples
+    count = min(int(sr * fade_duration), len(samples) // 2)
+    if count <= 0:
+        return samples
+    result = np.array(samples, dtype=np.float32, copy=True)
+    phase = np.linspace(0, np.pi / 2, count, dtype=np.float32)
+    result[:count] *= np.sin(phase)
+    result[-count:] *= np.cos(phase)
+    return result
 
 
 def equal_power_crossfade(fade_out, fade_in, crossfade_samples):
@@ -155,6 +172,7 @@ def create_mixed_audio(analyses, tracks_data, output_path, crossfade_duration=4.
         return output_path, 0.0, []
 
     accumulated, _ = tracks_data[0]
+    accumulated = apply_edge_fades(accumulated, sr)
     acc_duration = len(accumulated) / sr
     current_time = acc_duration
 
@@ -172,6 +190,7 @@ def create_mixed_audio(analyses, tracks_data, output_path, crossfade_duration=4.
 
     for i in range(1, len(tracks_data)):
         samples, _ = tracks_data[i]
+        samples = apply_edge_fades(samples, sr)
 
         mix_duration = min(crossfade_duration,
                            len(accumulated) / sr / 3,

@@ -1,14 +1,21 @@
 """영상 생성 모듈: 유저 이미지 배경 + 비주얼라이저 + 페이드 이펙트"""
 
+import sys
 import numpy as np
 import os
 import json
 import colorsys
+import math
 import subprocess
 import shutil
+import copy
 import soundfile as sf
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from moviepy import AudioFileClip, VideoClip
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops
+from moviepy import AudioFileClip
+
+
+class RenderCancelledError(RuntimeError):
+    """Raised by a progress callback to stop encoding without fallback."""
 
 
 def _find_ffmpeg_exe():
@@ -111,6 +118,119 @@ def _detect_gpu_encoder():
     return 'libx264'
 
 
+def loop_video_to_duration(input_path, output_path, target_seconds, cancel_event=None):
+    """Repeat a completed video up to an exact target duration.
+
+    This uses ffmpeg's native loop path rather than rendering the Python
+    visualizer again. The repeated stream is encoded so the final partial loop
+    can end exactly at the requested timestamp instead of a keyframe boundary.
+    """
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"반복할 영상을 찾을 수 없습니다: {input_path}")
+    if target_seconds <= 0:
+        raise ValueError("반복 영상 길이는 0초보다 커야 합니다.")
+    if os.path.abspath(input_path) == os.path.abspath(output_path):
+        raise ValueError("반복 영상 출력 경로는 원본과 달라야 합니다.")
+
+    ffmpeg_exe = _find_ffmpeg_exe()
+    if not ffmpeg_exe:
+        raise RuntimeError("영상 반복에 필요한 ffmpeg를 찾을 수 없습니다.")
+
+    output_dir = os.path.dirname(os.path.abspath(output_path))
+    os.makedirs(output_dir, exist_ok=True)
+    temp_output = os.path.join(
+        output_dir, f".{os.path.basename(output_path)}.partial.mp4"
+    )
+    command = [
+        ffmpeg_exe, '-hide_banner', '-loglevel', 'error', '-y',
+        '-stream_loop', '-1', '-i', os.path.abspath(input_path),
+        '-t', f"{float(target_seconds):.3f}",
+        '-map', '0:v:0', '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+        '-c:a', 'aac', '-b:a', '192k',
+        '-movflags', '+faststart',
+        temp_output,
+    ]
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace',
+        )
+        while process.poll() is None:
+            if cancel_event is not None and cancel_event.wait(0.1):
+                process.terminate()
+                process.wait(timeout=5)
+                raise RuntimeError("사용자가 반복 영상 생성을 취소했습니다.")
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            detail = (stderr or stdout or "알 수 없는 오류").strip()
+            raise RuntimeError(f"영상 반복 생성 실패:\n{detail}")
+        os.replace(temp_output, output_path)
+    finally:
+        if os.path.exists(temp_output):
+            try:
+                os.remove(temp_output)
+            except OSError:
+                pass
+
+    return output_path
+
+
+def loop_video_repetitions(
+    input_path, output_path, repeat_count, cancel_event=None,
+):
+    """Repeat a completed video by whole-playlist units without truncation."""
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"반복할 영상을 찾을 수 없습니다: {input_path}")
+    count = int(repeat_count)
+    if count < 1:
+        raise ValueError("반복 횟수는 1회 이상이어야 합니다.")
+    if os.path.abspath(input_path) == os.path.abspath(output_path):
+        raise ValueError("반복 영상 출력 경로는 원본과 달라야 합니다.")
+
+    ffmpeg_exe = _find_ffmpeg_exe()
+    if not ffmpeg_exe:
+        raise RuntimeError("영상 반복에 필요한 ffmpeg를 찾을 수 없습니다.")
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    temp_output = os.path.join(
+        os.path.dirname(os.path.abspath(output_path)),
+        f".{os.path.basename(output_path)}.partial.mp4",
+    )
+    command = [
+        ffmpeg_exe, '-hide_banner', '-loglevel', 'error', '-y',
+        '-stream_loop', str(count - 1), '-i', os.path.abspath(input_path),
+        '-map', '0:v:0', '-map', '0:a?', '-c', 'copy',
+        '-movflags', '+faststart', temp_output,
+    ]
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding='utf-8', errors='replace',
+        )
+        while process.poll() is None:
+            if cancel_event is not None and cancel_event.wait(0.1):
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                raise RuntimeError("사용자가 반복 영상 생성을 취소했습니다.")
+        stdout, stderr = process.communicate()
+        if process.returncode:
+            raise RuntimeError(
+                f"영상 반복 생성 실패:\n"
+                f"{(stderr or stdout or '알 수 없는 오류').strip()}"
+            )
+        os.replace(temp_output, output_path)
+    finally:
+        if os.path.exists(temp_output):
+            try:
+                os.remove(temp_output)
+            except OSError:
+                pass
+    return output_path
+
+
 FONT_PATH = None
 _font_search = [
     "C:/Windows/Fonts/D2Coding-Ver1.3.2-20180524-all.ttc",
@@ -125,17 +245,36 @@ for _fp in _font_search:
 
 
 DEFAULT_CONFIG = {
-    "background": {"image": None, "opacity": 1.0, "blur": 0, "darken": 0.0},
+    "background": {
+        "image": None, "opacity": 1.0, "blur": 0,
+        "darken": 0.0, "fit": "cover",
+    },
+    "overlays": {
+        "album": {
+            "image": None, "x": 80, "y": 80, "width": 360,
+            "opacity": 1.0, "corner_radius": 0,
+        },
+        "logo": {
+            "image": None, "x": 1660, "y": 60, "width": 180,
+            "opacity": 1.0, "corner_radius": 0,
+        },
+    },
     "visualizer": {
         "type": "eq_bars", "position": "bottom", "color": "#ffffff",
         "opacity": 0.85, "bar_count": 64, "height": 120,
         "smoothing": 0.3, "mirror": False, "gradient": True,
+        "bar_width": 0, "bar_gap": 2, "min_height": 1,
+        "sensitivity": 1.0, "corner_radius": 2, "glow": 0,
+        "decay": 0.82,
+        "line_width": 2,
         "x": 0, "y": 0, "width": 0, "height_override": 0,
     },
     "text": {
         "show_title": True, "show_bpm": True, "show_key": True,
         "show_camelot": False, "show_time": True, "position": "center",
         "font_size": 42, "sub_font_size": 28, "color": "#ffffff",
+        "align": "center", "x": 0.5, "y": 0.5,
+        "bold": False, "italic": False, "underline": False,
         "shadow": True, "shadow_color": "#000000", "shadow_offset": 3,
         "custom_text": "",
         "custom_x": 0.5, "custom_y": 0.3,
@@ -153,7 +292,7 @@ DEFAULT_CONFIG = {
 
 
 def load_visual_config(config_path=None):
-    config = DEFAULT_CONFIG.copy()
+    config = copy.deepcopy(DEFAULT_CONFIG)
     if config_path and os.path.exists(config_path):
         with open(config_path, 'r', encoding='utf-8') as f:
             user_config = json.load(f)
@@ -167,9 +306,107 @@ def load_visual_config(config_path=None):
     return config
 
 
+def merge_visual_config(config_dict=None):
+    config = copy.deepcopy(DEFAULT_CONFIG)
+    for section, values in (config_dict or {}).items():
+        if section.startswith('_'):
+            continue
+        if section in config and isinstance(config[section], dict) and isinstance(values, dict):
+            config[section].update({
+                key: value for key, value in values.items()
+                if not key.startswith('_')
+            })
+        else:
+            config[section] = copy.deepcopy(values)
+    return config
+
+
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+
+_FONT_FILE_CACHE = None
+
+
+def _system_font_files():
+    """Map normalized family names to font files once per process."""
+    global _FONT_FILE_CACHE
+    if _FONT_FILE_CACHE is not None:
+        return _FONT_FILE_CACHE
+    mapping = {}
+    directories = [
+        os.path.join(os.environ.get('WINDIR', 'C:/Windows'), 'Fonts'),
+        os.path.join(
+            os.environ.get('LOCALAPPDATA', ''),
+            'Microsoft', 'Windows', 'Fonts',
+        ),
+    ]
+    for directory in directories:
+        if not directory or not os.path.isdir(directory):
+            continue
+        for filename in os.listdir(directory):
+            if os.path.splitext(filename)[1].lower() not in (
+                '.ttf', '.ttc', '.otf'
+            ):
+                continue
+            path = os.path.join(directory, filename)
+            stem = os.path.splitext(filename)[0]
+            mapping.setdefault(stem.casefold(), path)
+            try:
+                from fontTools.ttLib import TTFont
+                font = TTFont(path, fontNumber=0, lazy=True)
+                for record in font['name'].names:
+                    if record.nameID not in (1, 4, 6):
+                        continue
+                    try:
+                        name = record.toUnicode().strip()
+                    except Exception:
+                        continue
+                    if name:
+                        mapping.setdefault(name.casefold(), path)
+                font.close()
+            except Exception:
+                continue
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            for hive, key_name in (
+                (
+                    winreg.HKEY_LOCAL_MACHINE,
+                    r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+                ),
+                (
+                    winreg.HKEY_CURRENT_USER,
+                    r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+                ),
+            ):
+                try:
+                    key = winreg.OpenKey(hive, key_name)
+                except OSError:
+                    continue
+                index = 0
+                while True:
+                    try:
+                        display_name, filename, _ = winreg.EnumValue(key, index)
+                    except OSError:
+                        break
+                    index += 1
+                    family = display_name.split(' (')[0].strip()
+                    if not os.path.isabs(filename):
+                        candidate_dirs = directories
+                    else:
+                        candidate_dirs = ('',)
+                    for directory in candidate_dirs:
+                        path = os.path.join(directory, filename)
+                        if os.path.isfile(path):
+                            mapping.setdefault(family.casefold(), path)
+                            break
+                winreg.CloseKey(key)
+        except (ImportError, OSError):
+            pass
+    _FONT_FILE_CACHE = mapping
+    return mapping
 
 
 def get_font(size, family=None):
@@ -179,7 +416,22 @@ def get_font(size, family=None):
         try:
             return ImageFont.truetype(family, size)
         except (OSError, IOError):
-            pass
+            normalized = str(family).strip().casefold()
+            mapping = _system_font_files()
+            path = mapping.get(normalized)
+            if path is None:
+                path = next(
+                    (
+                        value for name, value in mapping.items()
+                        if normalized in name or name in normalized
+                    ),
+                    None,
+                )
+            if path:
+                try:
+                    return ImageFont.truetype(path, size)
+                except (OSError, IOError):
+                    pass
 
     local_appdata = _sys.platform == 'win32' and _sys.modules.get('os').environ.get('LOCALAPPDATA', '')
     paths = [
@@ -202,10 +454,21 @@ def get_font(size, family=None):
     return ImageFont.load_default()
 
 
-def load_background_image(image_path, width, height):
+def load_background_image(image_path, width, height, fit='cover'):
     img = Image.open(image_path).convert('RGB')
     img_ratio = img.width / img.height
     target_ratio = width / height
+    if fit == 'contain':
+        if img_ratio > target_ratio:
+            new_w = width
+            new_h = int(width / img_ratio)
+        else:
+            new_h = height
+            new_w = int(height * img_ratio)
+        resized = img.resize((new_w, new_h), Image.LANCZOS)
+        canvas = Image.new('RGB', (width, height), (0, 0, 0))
+        canvas.paste(resized, ((width - new_w) // 2, (height - new_h) // 2))
+        return canvas
     if img_ratio > target_ratio:
         new_h = height
         new_w = int(height * img_ratio)
@@ -241,7 +504,9 @@ def create_gradient_bg(width, height, key, mode):
 def prepare_background(width, height, config, key='C', mode='major'):
     bg_cfg = config['background']
     if bg_cfg['image'] and os.path.exists(bg_cfg['image']):
-        bg = load_background_image(bg_cfg['image'], width, height)
+        bg = load_background_image(
+            bg_cfg['image'], width, height, bg_cfg.get('fit', 'cover')
+        )
     else:
         bg = create_gradient_bg(width, height, key, mode)
 
@@ -256,6 +521,43 @@ def prepare_background(width, height, config, key='C', mode='major'):
     return bg
 
 
+def paste_image_overlay(base, settings):
+    path = settings.get('image')
+    if not path or not os.path.isfile(path):
+        return
+    try:
+        overlay = Image.open(path).convert('RGBA')
+        target_width = max(1, int(settings.get('width', overlay.width)))
+        target_height = max(
+            1, round(overlay.height * target_width / max(overlay.width, 1))
+        )
+        overlay = overlay.resize(
+            (target_width, target_height), Image.Resampling.LANCZOS
+        )
+        radius = max(0, int(settings.get('corner_radius', 0)))
+        if radius:
+            mask = Image.new('L', overlay.size, 0)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                (0, 0, overlay.width - 1, overlay.height - 1),
+                radius=min(radius, min(overlay.size) // 2), fill=255,
+            )
+            overlay.putalpha(ImageChops.multiply(overlay.getchannel('A'), mask))
+        opacity = max(0.0, min(1.0, float(settings.get('opacity', 1.0))))
+        if opacity < 1:
+            overlay.putalpha(
+                overlay.getchannel('A').point(lambda value: int(value * opacity))
+            )
+        x = max(0, min(
+            int(settings.get('x', 0)), max(0, base.width - overlay.width)
+        ))
+        y = max(0, min(
+            int(settings.get('y', 0)), max(0, base.height - overlay.height)
+        ))
+        base.paste(overlay, (x, y), overlay)
+    except (OSError, ValueError):
+        return
+
+
 def track_reference_max(stft_mags, percentile=95):
     """트랙 전체 기준 정규화 값(퍼센타일). 시각화 함수들이 프레임 단위로
     자기 자신의 최댓값에 맞춰 정규화하면 조용한 구간도 항상 풀스케일로
@@ -266,7 +568,10 @@ def track_reference_max(stft_mags, percentile=95):
 
 
 def get_eq_bars(stft_mags, t, sr, hop_length, n_bars, bar_height, width,
-                color_rgb, smoothing, prev_vals=None, track_max=None):
+                color_rgb, smoothing, prev_vals=None, track_max=None,
+                bar_width_override=0, gap=2, min_height=1,
+                sensitivity=1.0, opacity=0.85, corner_radius=0,
+                decay=None, mirror=False):
     frame_idx = int(t * sr / hop_length)
     frame_idx = min(frame_idx, stft_mags.shape[1] - 1)
     frame_idx = max(0, frame_idx)
@@ -282,13 +587,25 @@ def get_eq_bars(stft_mags, t, sr, hop_length, n_bars, bar_height, width,
 
     max_val = track_max if track_max is not None else (np.max(bars) + 1e-8)
     bars = bars / max_val
-    bars = np.clip(bars, 0, 1)
+    bars = np.clip(bars * max(0.01, sensitivity), 0, 1)
 
     if prev_vals is not None and smoothing > 0:
-        bars = prev_vals * smoothing + bars * (1 - smoothing)
+        if decay is None:
+            bars = prev_vals * smoothing + bars * (1 - smoothing)
+        else:
+            rising = bars >= prev_vals
+            attack_values = prev_vals * smoothing + bars * (1 - smoothing)
+            release_values = prev_vals * decay + bars * (1 - decay)
+            bars = np.where(rising, attack_values, release_values)
+    if mirror and len(bars) > 1:
+        bars = (bars + bars[::-1]) * 0.5
 
-    bar_width = max(1, (width - 40) // n_bars - 2)
-    gap = 2
+    gap = max(0, int(gap))
+    bar_width = (
+        max(1, int(bar_width_override))
+        if bar_width_override
+        else max(1, (width - 40) // n_bars - gap)
+    )
     total_width = n_bars * (bar_width + gap)
     start_x = (width - total_width) // 2
 
@@ -296,19 +613,28 @@ def get_eq_bars(stft_mags, t, sr, hop_length, n_bars, bar_height, width,
     draw = ImageDraw.Draw(img)
 
     for i in range(n_bars):
-        h = int(bars[i] * bar_height * 0.95)
+        h = max(int(min_height), int(bars[i] * bar_height * 0.95))
         if h < 1:
             continue
         x = start_x + i * (bar_width + gap)
         y = bar_height - h
-        alpha = int(255 * bars[i] * 0.85 + 40)
+        alpha = int(min(255, (255 * bars[i] * 0.85 + 40) * opacity))
         r, g, b = color_rgb
-        draw.rectangle([x, y, x + bar_width, bar_height], fill=(r, g, b, alpha))
+        box = [x, y, x + bar_width, bar_height]
+        if corner_radius:
+            draw.rounded_rectangle(
+                box, radius=min(int(corner_radius), bar_width // 2),
+                fill=(r, g, b, alpha),
+            )
+        else:
+            draw.rectangle(box, fill=(r, g, b, alpha))
 
     return img, bars
 
 
-def get_waveform_frame(waveform, t, sr, width, height, color_rgb):
+def get_waveform_frame(
+    waveform, t, sr, width, height, color_rgb, line_width=2
+):
     samples_per_pixel = max(1, len(waveform) // width)
     center_y = height // 2
     half_h = height // 2 - 4
@@ -330,16 +656,24 @@ def get_waveform_frame(waveform, t, sr, width, height, color_rgb):
     ys_top = center_y - y_offsets
     points_top = list(zip(xs.tolist(), ys_top.tolist()))
     r, g, b = color_rgb
-    draw.line(points_top, fill=(r, g, b, 200), width=2)
+    draw.line(
+        points_top, fill=(r, g, b, 200), width=max(1, int(line_width))
+    )
 
     ys_bot = center_y + y_offsets
     points_bot = list(zip(xs.tolist(), ys_bot.tolist()))
-    draw.line(points_bot, fill=(r, g, b, 120), width=1)
+    draw.line(
+        points_bot, fill=(r, g, b, 120),
+        width=max(1, int(line_width) // 2),
+    )
 
     return img
 
 
-def get_spectrum_frame(stft_mags, t, sr, hop_length, width, height, color_rgb, track_max=None):
+def get_spectrum_frame(
+    stft_mags, t, sr, hop_length, width, height, color_rgb,
+    track_max=None, smoothing=0, prev_vals=None,
+):
     frame_idx = int(t * sr / hop_length)
     frame_idx = min(frame_idx, stft_mags.shape[1] - 1)
     frame_idx = max(0, frame_idx)
@@ -349,6 +683,8 @@ def get_spectrum_frame(stft_mags, t, sr, hop_length, width, height, color_rgb, t
     max_val = track_max if track_max is not None else (np.max(mags) + 1e-8)
     mags = mags / max_val
     mags = np.clip(mags, 0, 1)
+    if prev_vals is not None and len(prev_vals) == len(mags):
+        mags = prev_vals * smoothing + mags * (1 - smoothing)
 
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
 
@@ -363,10 +699,13 @@ def get_spectrum_frame(stft_mags, t, sr, hop_length, width, height, color_rgb, t
         draw = ImageDraw.Draw(img)
         draw.rectangle([x, height - h, x + bar_w - 1, height], fill=(r, g, b, alpha))
 
-    return img
+    return img, mags
 
 
-def get_circles_frame(stft_mags, t, sr, hop_length, width, height, color_rgb, prev_energy=0, track_max=None):
+def get_circles_frame(
+    stft_mags, t, sr, hop_length, width, height, color_rgb,
+    prev_energy=None, track_max=None, smoothing=0, line_width=2,
+):
     frame_idx = int(t * sr / hop_length)
     frame_idx = min(frame_idx, stft_mags.shape[1] - 1)
     frame_idx = max(0, frame_idx)
@@ -380,6 +719,10 @@ def get_circles_frame(stft_mags, t, sr, hop_length, width, height, color_rgb, pr
     max_e = track_max if track_max is not None else (np.max(energies) + 1e-8)
     energies = energies / max_e
     energies = np.clip(energies, 0, 1)
+    if prev_energy is not None and len(prev_energy) == len(energies):
+        energies = (
+            prev_energy * smoothing + energies * (1 - smoothing)
+        )
 
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -390,17 +733,18 @@ def get_circles_frame(stft_mags, t, sr, hop_length, width, height, color_rgb, pr
     for i, e in enumerate(energies):
         radius = int(20 + e * min(width, height) * 0.35)
         alpha = int(60 + 195 * e)
-        line_w = max(1, int(2 + e * 4))
+        line_w = max(1, int(line_width + e * line_width))
         draw.ellipse(
             [cx - radius, cy - radius, cx + radius, cy + radius],
             outline=(r, g, b, alpha), width=line_w,
         )
 
-    return img
+    return img, energies
 
 
 def get_radial_bars(stft_mags, t, sr, hop_length, n_bars, bar_height, width, height,
-                    color_rgb, smoothing, prev_vals=None, track_max=None):
+                    color_rgb, smoothing, prev_vals=None, track_max=None,
+                    line_width=2):
     frame_idx = int(t * sr / hop_length)
     frame_idx = min(frame_idx, stft_mags.shape[1] - 1)
     frame_idx = max(0, frame_idx)
@@ -437,7 +781,10 @@ def get_radial_bars(stft_mags, t, sr, hop_length, n_bars, bar_height, width, hei
         x2 = cx + int((base_r + h) * np.cos(angle))
         y2 = cy + int((base_r + h) * np.sin(angle))
         alpha = int(100 + 155 * bars[i])
-        draw.line([(x1, y1), (x2, y2)], fill=(r, g, b, alpha), width=3)
+        draw.line(
+            [(x1, y1), (x2, y2)], fill=(r, g, b, alpha),
+            width=max(1, int(line_width)),
+        )
 
     return img, bars
 
@@ -621,17 +968,26 @@ class LiveFrameRenderer:
         self.height = height
         self.total_duration = total_duration
 
-        self.config = config_dict if config_dict is not None else load_visual_config(visual_config_path)
+        self.config = (
+            merge_visual_config(config_dict)
+            if config_dict is not None
+            else load_visual_config(visual_config_path)
+        )
         self.vcfg = self.config['visualizer']
         self.tcfg = self.config['text']
         self.pcfg = self.config['progress_bar']
         self.fcfg = self.config['fade']
         self.ecfg = self.config.get('effects', {})
 
-        custom_font_family = self.tcfg.get('custom_font_family', None)
-        self.font_title = get_font(self.tcfg['font_size'], custom_font_family)
-        self.font_sub = get_font(self.tcfg['sub_font_size'], custom_font_family)
-        self.font_time = get_font(22, custom_font_family)
+        text_font_family = self.tcfg.get('text_font_family', None)
+        styled_family = text_font_family
+        if styled_family and self.tcfg.get('bold'):
+            styled_family += " Bold"
+        if styled_family and self.tcfg.get('italic'):
+            styled_family += " Italic"
+        self.font_title = get_font(self.tcfg['font_size'], styled_family)
+        self.font_sub = get_font(self.tcfg['sub_font_size'], styled_family)
+        self.font_time = get_font(22, text_font_family)
 
         self.text_color = hex_to_rgb(self.tcfg['color'])
         self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'])
@@ -677,6 +1033,7 @@ class LiveFrameRenderer:
                 self.beat_time_cache[a.filename] = np.array([])
 
         self.smooth_cache = {}
+        self._smooth_times = {}
         self.effects_active = any(self.ecfg.get(k) for k in ['bounce', 'shake', 'zoom', 'flash'])
         self.crt_active = self.ecfg.get('crt', False)
 
@@ -734,10 +1091,15 @@ class LiveFrameRenderer:
         self.fcfg = self.config['fade']
         self.ecfg = self.config.get('effects', {})
 
-        custom_font_family = self.tcfg.get('custom_font_family', None)
-        self.font_title = get_font(self.tcfg['font_size'], custom_font_family)
-        self.font_sub = get_font(self.tcfg['sub_font_size'], custom_font_family)
-        self.font_time = get_font(22, custom_font_family)
+        text_font_family = self.tcfg.get('text_font_family', None)
+        styled_family = text_font_family
+        if styled_family and self.tcfg.get('bold'):
+            styled_family += " Bold"
+        if styled_family and self.tcfg.get('italic'):
+            styled_family += " Italic"
+        self.font_title = get_font(self.tcfg['font_size'], styled_family)
+        self.font_sub = get_font(self.tcfg['sub_font_size'], styled_family)
+        self.font_time = get_font(22, text_font_family)
 
         self.text_color = hex_to_rgb(self.tcfg['color'])
         self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'])
@@ -750,6 +1112,7 @@ class LiveFrameRenderer:
             for a in self.analyses
         }
         self.smooth_cache = {}
+        self._smooth_times = {}
         self.effects_active = any(self.ecfg.get(k) for k in ['bounce', 'shake', 'zoom', 'flash'])
         self.crt_active = self.ecfg.get('crt', False)
 
@@ -778,11 +1141,22 @@ class LiveFrameRenderer:
                 continue
 
             bg = self.bg_cache[a.filename].copy()
+            overlays = self.config.get('overlays', {})
+            paste_image_overlay(bg, overlays.get('album', {}))
+            paste_image_overlay(bg, overlays.get('logo', {}))
             draw = ImageDraw.Draw(bg)
-            center_x = width // 2
+            text_x = int(float(tcfg.get('x', 0.5)) * width)
+            text_align = tcfg.get('align', 'center')
+
+            def aligned_x(text_width):
+                if text_align == 'left':
+                    return text_x
+                if text_align == 'right':
+                    return text_x - text_width
+                return text_x - text_width // 2
 
             if tcfg['position'] == 'center':
-                base_y = height // 2 - 60
+                base_y = int(float(tcfg.get('y', 0.5)) * height) - 60
             else:
                 base_y = 80
 
@@ -792,10 +1166,16 @@ class LiveFrameRenderer:
                     title = title[:37] + "..."
                 bbox = draw.textbbox((0, 0), title, font=font_title)
                 tw = bbox[2] - bbox[0]
-                tx = (width - tw) // 2
+                tx = aligned_x(tw)
                 draw_text_with_shadow(draw, (tx, base_y), title, font_title,
                                       (*text_color, 255), tcfg['shadow'],
                                       (*shadow_c, 200), tcfg['shadow_offset'])
+                if tcfg.get('underline'):
+                    draw.line(
+                        (tx, base_y + bbox[3] - bbox[1] + 3,
+                         tx + tw, base_y + bbox[3] - bbox[1] + 3),
+                        fill=(*text_color, 255), width=2,
+                    )
 
             info_y = base_y + 65
             info_parts = []
@@ -811,17 +1191,25 @@ class LiveFrameRenderer:
                 info_text = "  |  ".join(info_parts)
                 bbox = draw.textbbox((0, 0), info_text, font=font_sub)
                 tw = bbox[2] - bbox[0]
-                tx = (width - tw) // 2
+                tx = aligned_x(tw)
                 draw_text_with_shadow(draw, (tx, info_y), info_text, font_sub,
                                       (*text_color, 200), tcfg['shadow'],
                                       (*shadow_c, 150), tcfg['shadow_offset'])
+                if tcfg.get('underline'):
+                    draw.line(
+                        (tx, info_y + bbox[3] - bbox[1] + 2,
+                         tx + tw, info_y + bbox[3] - bbox[1] + 2),
+                        fill=(*text_color, 200), width=1,
+                    )
 
             custom_text = tcfg.get('custom_text', '')
             if custom_text:
                 custom_font_size = tcfg.get('custom_font_size', 36)
                 custom_bold = tcfg.get('custom_bold', False)
                 custom_italic = tcfg.get('custom_italic', False)
-                custom_font = get_font(custom_font_size)
+                custom_font = get_font(
+                    custom_font_size, tcfg.get('custom_font_family')
+                )
                 custom_color = hex_to_rgb(tcfg.get('custom_color', '#ffffff'))
                 cx_pos = int(tcfg.get('custom_x', 0.5) * width)
                 cy_pos = int(tcfg.get('custom_y', 0.3) * height)
@@ -922,18 +1310,47 @@ class LiveFrameRenderer:
                 vx = int(vcfg.get('x', 0))
                 vy = int(vcfg.get('y', 0))
                 if vy == 0:
-                    vy = 0 if vcfg['position'] == 'top' else height - bar_h_actual
+                    if vcfg['position'] == 'top':
+                        vy = 0
+                    elif vcfg['position'] == 'center':
+                        vy = (height - bar_h_actual) // 2
+                    else:
+                        vy = height - bar_h_actual
 
                 cached_key = f"{a.filename}_eq"
                 prev = smooth_cache.get(cached_key)
+                last_t = self._smooth_times.get(cached_key)
+                delta_t = (
+                    max(0.0, local_t - last_t)
+                    if last_t is not None else 1 / 60
+                )
+                base_smoothing = float(vcfg.get('smoothing', 0.3))
+                time_smoothing = (
+                    base_smoothing ** max(0.001, delta_t * 60)
+                    if base_smoothing > 0 else 0
+                )
+                base_decay = float(vcfg.get('decay', 0.82))
+                time_decay = (
+                    base_decay ** max(0.001, delta_t * 60)
+                    if base_decay > 0 else 0
+                )
 
                 viz_layer, curr_vals = get_eq_bars(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length,
                     vcfg['bar_count'], bar_h_actual, vw,
-                    viz_color, vcfg['smoothing'], prev,
+                    viz_color, time_smoothing, prev,
                     track_max=track_viz_max.get(a.filename),
+                    bar_width_override=vcfg.get('bar_width', 0),
+                    gap=vcfg.get('bar_gap', 2),
+                    min_height=vcfg.get('min_height', 1),
+                    sensitivity=vcfg.get('sensitivity', 1.0),
+                    opacity=vcfg.get('opacity', 0.85),
+                    corner_radius=vcfg.get('corner_radius', 0),
+                    decay=time_decay,
+                    mirror=vcfg.get('mirror', False),
                 )
                 smooth_cache[cached_key] = curr_vals
+                self._smooth_times[cached_key] = local_t
 
                 if vcfg['gradient']:
                     grad = Image.new('RGBA', (vw, bar_h_actual), (0, 0, 0, 0))
@@ -947,13 +1364,27 @@ class LiveFrameRenderer:
                         flipped = grad.transpose(Image.FLIP_TOP_BOTTOM)
                         viz_layer = Image.alpha_composite(viz_layer, flipped)
 
+                if vcfg.get('invert'):
+                    viz_layer = viz_layer.transpose(Image.FLIP_TOP_BOTTOM)
+                glow_radius = int(vcfg.get('glow', 0))
+                if glow_radius > 0:
+                    glow = viz_layer.filter(
+                        ImageFilter.GaussianBlur(radius=glow_radius)
+                    )
+                    viz_layer = Image.alpha_composite(glow, viz_layer)
+
                 frame.paste(viz_layer, (int(vx), int(vy)), viz_layer)
 
             elif vcfg['type'] == 'waveform':
                 wh = int(vcfg['height'])
-                wf = get_waveform_frame(a.waveform, local_t, a.sr, width, wh, viz_color)
+                wf = get_waveform_frame(
+                    a.waveform, local_t, a.sr, width, wh, viz_color,
+                    line_width=vcfg.get('line_width', 2),
+                )
                 if vcfg['position'] == 'top':
                     frame.paste(wf, (0, 0), wf)
+                elif vcfg['position'] == 'center':
+                    frame.paste(wf, (0, (height - wh) // 2), wf)
                 else:
                     frame.paste(wf, (0, height - wh), wf)
 
@@ -963,20 +1394,54 @@ class LiveFrameRenderer:
                 sx = int(vcfg.get('x', 0))
                 sy = int(vcfg.get('y', 0))
                 if sy == 0:
-                    sy = 0 if vcfg['position'] == 'top' else height - sh
-                spec = get_spectrum_frame(
+                    if vcfg['position'] == 'top':
+                        sy = 0
+                    elif vcfg['position'] == 'center':
+                        sy = (height - sh) // 2
+                    else:
+                        sy = height - sh
+                spectrum_key = f"{a.filename}_spectrum"
+                previous_spectrum = smooth_cache.get(spectrum_key)
+                spectrum_last_t = self._smooth_times.get(spectrum_key)
+                spectrum_delta = (
+                    max(0.0, local_t - spectrum_last_t)
+                    if spectrum_last_t is not None else 1 / 60
+                )
+                spectrum_smoothing = float(
+                    vcfg.get('smoothing', 0.3)
+                ) ** max(0.001, spectrum_delta * 60)
+                spec, spectrum_values = get_spectrum_frame(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length, sw, sh, viz_color,
                     track_max=track_viz_max.get(a.filename),
+                    smoothing=spectrum_smoothing,
+                    prev_vals=previous_spectrum,
                 )
+                smooth_cache[spectrum_key] = spectrum_values
+                self._smooth_times[spectrum_key] = local_t
                 frame.paste(spec, (int(sx), int(sy)), spec)
 
             elif vcfg['type'] == 'circles':
                 ch = int(vcfg['height']) * 2
-                circles = get_circles_frame(
+                circle_key = f"{a.filename}_circles"
+                previous_circles = smooth_cache.get(circle_key)
+                circle_last_t = self._smooth_times.get(circle_key)
+                circle_delta = (
+                    max(0.0, local_t - circle_last_t)
+                    if circle_last_t is not None else 1 / 60
+                )
+                circle_smoothing = float(
+                    vcfg.get('smoothing', 0.3)
+                ) ** max(0.001, circle_delta * 60)
+                circles, circle_values = get_circles_frame(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length,
                     width, ch, viz_color,
                     track_max=track_viz_max.get(a.filename),
+                    smoothing=circle_smoothing,
+                    prev_energy=previous_circles,
+                    line_width=vcfg.get('line_width', 2),
                 )
+                smooth_cache[circle_key] = circle_values
+                self._smooth_times[circle_key] = local_t
                 cy_pos = (height - int(ch)) // 2
                 frame.paste(circles, (0, cy_pos), circles)
 
@@ -984,14 +1449,26 @@ class LiveFrameRenderer:
                 rh = int(vcfg['height']) * 2
                 cached_key_r = f"{a.filename}_radial"
                 prev_r = smooth_cache.get(cached_key_r)
+                last_r_t = self._smooth_times.get(cached_key_r)
+                delta_r_t = (
+                    max(0.0, local_t - last_r_t)
+                    if last_r_t is not None else 1 / 60
+                )
+                base_r_smoothing = float(vcfg.get('smoothing', 0.3))
+                radial_smoothing = (
+                    base_r_smoothing ** max(0.001, delta_r_t * 60)
+                    if base_r_smoothing > 0 else 0
+                )
 
                 radial, curr_r = get_radial_bars(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length,
                     vcfg['bar_count'], vcfg['height'],
-                    width, rh, viz_color, vcfg['smoothing'], prev_r,
+                    width, rh, viz_color, radial_smoothing, prev_r,
                     track_max=track_viz_max.get(a.filename),
+                    line_width=vcfg.get('line_width', 2),
                 )
                 smooth_cache[cached_key_r] = curr_r
+                self._smooth_times[cached_key_r] = local_t
                 ry = (height - int(rh)) // 2
                 frame.paste(radial, (0, ry), radial)
 
@@ -1052,16 +1529,22 @@ class LiveFrameRenderer:
 def generate_video(analyses, mixed_audio_path, output_path,
                    width=1920, height=1080, visual_config_path=None,
                    timestamps=None, timestamp_duration=8.0, crossfade_duration=4.0,
-                   frame_progress_callback=None, fps=24):
+                   frame_progress_callback=None, fps=24,
+                   video_codec='auto', audio_codec='aac',
+                   video_bitrate='5000k', audio_bitrate='192k'):
     print("\n영상 생성 시작...")
 
     if not os.path.isfile(mixed_audio_path):
         raise FileNotFoundError(f"믹스 오디오 파일을 찾을 수 없습니다: {mixed_audio_path}")
 
-    audio_clip = AudioFileClip(mixed_audio_path)
-    if audio_clip is None:
-        raise RuntimeError(f"오디오 파일을 열 수 없습니다: {mixed_audio_path}")
-    total_duration = audio_clip.duration
+    try:
+        total_duration = float(sf.info(mixed_audio_path).duration)
+    except Exception:
+        audio_clip = AudioFileClip(mixed_audio_path)
+        if audio_clip is None:
+            raise RuntimeError(f"오디오 파일을 열 수 없습니다: {mixed_audio_path}")
+        total_duration = audio_clip.duration
+        audio_clip.close()
     fps = fps if fps else 24
 
     renderer = LiveFrameRenderer(
@@ -1079,30 +1562,7 @@ def generate_video(analyses, mixed_audio_path, output_path,
         print(f"  이펙트: {', '.join(active_fx)}")
     print(f"  총 길이: {total_duration:.1f}s | 해상도: {width}x{height} | FPS: {fps}")
 
-    _raw_make_frame = renderer.render_frame
-
-    _total_frames = max(1, int(total_duration * fps))
-    _frame_counter = [0]
-
-    def _make_frame_with_progress(t):
-        frame = _raw_make_frame(t)
-        _frame_counter[0] += 1
-        if frame_progress_callback:
-            try:
-                frame_progress_callback(_frame_counter[0], _total_frames)
-            except Exception:
-                pass
-        return frame
-
-    make_frame = _make_frame_with_progress
-
-    main_video = VideoClip(make_frame, duration=total_duration)
-    main_video = main_video.with_audio(audio_clip)
-
-    final_video = main_video
-
-    if final_video is None:
-        raise RuntimeError("영상 합치기 실패: 최종 영상 객체가 None입니다.")
+    _total_frames = max(1, math.ceil(total_duration * fps))
 
     # moviepy.config.FFMPEG_BINARY을 올바른 경로로 강제 설정.
     # PyInstaller 번들에서 imageio_ffmpeg의 ffmpeg 바이너리가 번들 안에 있지만
@@ -1126,47 +1586,86 @@ def generate_video(analyses, mixed_audio_path, output_path,
     if output_dir and not os.path.isdir(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    codec = _detect_gpu_encoder()
+    allowed_video_codecs = {
+        'auto', 'libx264', 'h264_nvenc', 'h264_qsv', 'h264_amf'
+    }
+    codec = (
+        _detect_gpu_encoder()
+        if video_codec not in allowed_video_codecs or video_codec == 'auto'
+        else video_codec
+    )
+    if width < 146 or height < 146:
+        codec = 'libx264'
     cpu_count = os.cpu_count() or 4
     gpu_msg = f"GPU 인코딩 ({codec})" if codec != 'libx264' else "CPU 인코딩 (libx264)"
     print(f"  렌더링 중... | {gpu_msg} | 스레드: {cpu_count} | (시간이 걸릴 수 있습니다)")
 
-    def _friendly_ffmpeg_error(e):
-        return RuntimeError(
-            "영상 인코딩 실패: ffmpeg 프로세스가 시작되지 못했습니다.\n"
-            "가능한 원인:\n"
-            "  1) ffmpeg 실행 파일이 exe 번들에 빠져 있음 "
-            "(--collect-all imageio_ffmpeg 옵션으로 다시 빌드)\n"
-            "  2) 출력 경로에 쓰기 권한이 없거나 디스크 공간 부족\n"
-            f"  3) 출력 경로 문제: {output_path}\n"
-            f"원본 오류: {e}"
+    def _encode(selected_codec, active_renderer):
+        temp_output = output_path + ".partial.mp4"
+        command = [
+            ffmpeg_path, '-hide_banner', '-loglevel', 'error', '-y',
+            '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+            '-s', f'{width}x{height}', '-r', str(fps), '-i', '-',
+            '-i', mixed_audio_path,
+            '-c:v', selected_codec, '-b:v', str(video_bitrate),
+        ]
+        if selected_codec == 'libx264':
+            command += ['-preset', 'medium', '-threads', str(cpu_count)]
+        command += [
+            '-c:a', audio_codec, '-b:a', str(audio_bitrate), '-shortest',
+            '-movflags', '+faststart', temp_output,
+        ]
+        process = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
+        try:
+            for frame_index in range(_total_frames):
+                frame = active_renderer.render_frame(frame_index / fps)
+                process.stdin.write(np.ascontiguousarray(frame, dtype=np.uint8).tobytes())
+                if frame_progress_callback:
+                    frame_progress_callback(frame_index + 1, _total_frames)
+            process.stdin.close()
+            stderr = process.stderr.read().decode('utf-8', errors='replace')
+            return_code = process.wait()
+            if return_code:
+                raise RuntimeError(stderr.strip() or "FFmpeg 영상 인코딩 실패")
+            os.replace(temp_output, output_path)
+        except Exception:
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            if os.path.exists(temp_output):
+                try:
+                    os.remove(temp_output)
+                except OSError:
+                    pass
+            raise
+        finally:
+            for stream in (process.stdin, process.stderr):
+                if stream and not stream.closed:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
 
     try:
-        final_video.write_videofile(
-            output_path, fps=fps, codec=codec, audio_codec='aac',
-            bitrate='5000k', preset='medium', threads=cpu_count,
-            logger=None,
-        )
-    except Exception as e_gpu:
+        _encode(codec, renderer)
+    except Exception as gpu_error:
+        if isinstance(gpu_error, RenderCancelledError):
+            raise
         if codec == 'libx264':
-            # CPU 인코딩으로 이미 시도한 것이었으면 더 재시도할 게 없음
-            if "'NoneType' object has no attribute 'write'" in str(e_gpu):
-                raise _friendly_ffmpeg_error(e_gpu) from e_gpu
             raise
-
-        print(f"  GPU 인코딩 실패 ({codec}), CPU 인코딩으로 재시도합니다... ({e_gpu})")
-        try:
-            final_video.write_videofile(
-                output_path, fps=fps, codec='libx264', audio_codec='aac',
-                bitrate='5000k', preset='medium', threads=cpu_count, logger=None,
-            )
-        except Exception as e_cpu:
-            # GPU도 실패하고 CPU 재시도도 실패한 경우 — 예전엔 이 재시도에
-            # try/except가 없어서 NoneType 에러가 그대로 새어나갔음
-            if "'NoneType' object has no attribute 'write'" in str(e_cpu):
-                raise _friendly_ffmpeg_error(e_cpu) from e_cpu
-            raise
+        print(f"  GPU 인코딩 실패 ({codec}), CPU 인코딩으로 재시도합니다... ({gpu_error})")
+        renderer = LiveFrameRenderer(
+            analyses, width, height, total_duration,
+            visual_config_path=visual_config_path,
+            timestamps=timestamps, crossfade_duration=crossfade_duration,
+        )
+        _encode('libx264', renderer)
 
     print(f"\n영상 저장 완료: {output_path}")
     return output_path

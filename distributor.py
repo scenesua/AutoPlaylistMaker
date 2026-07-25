@@ -1,6 +1,8 @@
 """자동 분배: 목표 영상 길이에 맞춰 BPM/키 밸런스 조절"""
 
 import random
+import os
+import re
 import numpy as np
 from itertools import combinations
 
@@ -79,10 +81,45 @@ def check_harmony_flow(group):
     return score
 
 
+def _artist_name(track):
+    name = os.path.splitext(track.get('filename', ''))[0]
+    return re.split(r'\s+-\s+|_', name, maxsplit=1)[0].strip().casefold()
+
+
+def sequence_score(group, preset="balanced", avoid_same_artist=True):
+    if len(group) < 2:
+        return 0
+    score = 0.0
+    energies = [
+        float(np.mean(t['analysis'].energy_profile))
+        if len(t['analysis'].energy_profile) else 0.0
+        for t in group
+    ]
+    if preset == "build_up":
+        score += sum(4 if b >= a else -4 for a, b in zip(energies, energies[1:]))
+    elif preset == "calm":
+        score -= np.std(energies) * 100
+    elif preset == "peak_middle" and len(energies) >= 3:
+        peak_index = int(np.argmax(energies))
+        score += max(0, 20 - abs(peak_index - (len(energies) - 1) / 2) * 5)
+    if avoid_same_artist:
+        artists = [_artist_name(t) for t in group]
+        score += sum(-25 if a and a == b else 2 for a, b in zip(artists, artists[1:]))
+    return score
+
+
 def distribute_tracks(tracks, target_seconds=3600.0, tolerance=0.10,
-                      max_videos=10, seed=None, progress_callback=None):
-    if seed is not None:
-        random.seed(seed)
+                      max_videos=10, seed=None, progress_callback=None,
+                      preset="balanced", avoid_same_artist=True):
+    if target_seconds <= 0:
+        raise ValueError("목표 영상 길이는 0초보다 커야 합니다.")
+    if not 0 <= tolerance < 1:
+        raise ValueError("허용 오차는 0 이상 1 미만이어야 합니다.")
+    if max_videos < 1:
+        raise ValueError("최대 영상 수는 1개 이상이어야 합니다.")
+
+    # Keep seeded runs reproducible without mutating process-wide randomness.
+    rng = random.Random(seed)
 
     audio_tracks = [t for t in tracks if hasattr(t, 'analysis') and t.analysis is not None]
     if not audio_tracks:
@@ -118,7 +155,7 @@ def distribute_tracks(tracks, target_seconds=3600.0, tolerance=0.10,
         if attempt == 0:
             pass
         else:
-            random.shuffle(shuffled)
+            rng.shuffle(shuffled)
 
         groups = _greedy_fill(shuffled, target_seconds, min_total, max_total, max_videos)
 
@@ -130,8 +167,9 @@ def distribute_tracks(tracks, target_seconds=3600.0, tolerance=0.10,
 
             div = diversity_score(g)
             harmony = check_harmony_flow(g)
+            sequence = sequence_score(g, preset, avoid_same_artist)
 
-            g_score = dur_fit * 40 + div + harmony * 0.5
+            g_score = dur_fit * 40 + div + harmony * 0.5 + sequence
             total_score += g_score
 
         penalty = abs(len(groups) - max(1, len(track_infos) * 60 / target_seconds)) * 5

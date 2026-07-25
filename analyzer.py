@@ -48,8 +48,10 @@ def detect_bpm(y, sr):
     return tempo, beat_times
 
 
-def detect_key(y, sr):
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+def detect_key(y, sr, chroma=None):
+    """Detect the musical key, optionally reusing a precomputed chromagram."""
+    if chroma is None:
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_mean = np.mean(chroma, axis=1)
 
     best_corr = -2
@@ -124,21 +126,21 @@ def classify_chord(chroma_vec):
         return root
 
 
-def compute_energy_profile(y, sr, segment_duration=1.0):
-    hop_length = 512
-    rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
+def compute_energy_profile(y, sr, segment_duration=1.0, rms=None, hop_length=512):
+    if rms is None:
+        rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
     frame_duration = librosa.frames_to_time(1, sr=sr, hop_length=hop_length)
 
-    segment_frames = int(segment_duration / frame_duration)
-    n_segments = len(rms) // segment_frames
+    segment_frames = max(1, int(segment_duration / frame_duration))
+    if len(rms) == 0:
+        return np.array([], dtype=np.float32)
 
-    energy = np.zeros(n_segments)
-    for i in range(n_segments):
-        start = i * segment_frames
-        end = min((i + 1) * segment_frames, len(rms))
-        energy[i] = np.mean(rms[start:end])
-
-    return energy
+    # Include the final partial segment and aggregate in NumPy instead of a
+    # Python loop. This is both faster and avoids losing short-track energy.
+    starts = np.arange(0, len(rms), segment_frames)
+    return np.add.reduceat(rms, starts) / np.minimum(
+        segment_frames, len(rms) - starts
+    )
 
 
 def analyze_track(filepath):
@@ -146,14 +148,16 @@ def analyze_track(filepath):
     y, sr = librosa.load(filepath, sr=22050, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
-    bpm, beat_times = detect_bpm(y, sr)
-    key, mode = detect_key(y, sr)
-    camelot = CAMELOT.get(key + ('m' if mode == 'minor' else ''), '8B')
-    chords = detect_chords_segments(y, sr)
-    energy = compute_energy_profile(y, sr)
     hop_length = 512
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
     rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
+
+    bpm, beat_times = detect_bpm(y, sr)
+    key, mode = detect_key(y, sr, chroma=chroma)
+    camelot = CAMELOT.get(key + ('m' if mode == 'minor' else ''), '8B')
+    energy = compute_energy_profile(
+        y, sr, rms=rms, hop_length=hop_length
+    )
 
     S = np.abs(librosa.stft(y, hop_length=hop_length))
     stft_times = librosa.frames_to_time(np.arange(S.shape[1]), sr=sr, hop_length=hop_length)

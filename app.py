@@ -1,5 +1,5 @@
 """
-Auto Playlist Maker GUI v1.1.0 - Dark theme, D2Coding font, dark/light toggle
+Auto Playlist Maker GUI v1.3.0 - Dark theme, D2Coding font, dark/light toggle
 4단계: 프로젝트+가져오기 → 자동분배 → 음악편집 → 영상편집+렌더링
 """
 
@@ -9,6 +9,8 @@ import json
 import threading
 import time
 import shutil
+import copy
+import webbrowser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from tkinter import font as tkfont
@@ -30,6 +32,31 @@ _PIL_ImageTk = None
 _PIL_ImageDraw = None
 _PIL_ImageFont = None
 video_gen = None
+APP_VERSION = "1.3.0"
+DONATION_URL = "https://toon.at/donate/scenesua"
+
+
+def resource_path(filename):
+    """Return a bundled resource path in source and PyInstaller builds."""
+    base_dir = getattr(
+        sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))
+    )
+    return os.path.join(base_dir, filename)
+
+
+def apply_window_icon(window):
+    """Apply both taskbar/EXE-style and Tk window icons consistently."""
+    try:
+        icon_image = tk.PhotoImage(file=resource_path("app_icon.png"))
+        window.iconphoto(True, icon_image)
+        window._app_icon_image = icon_image
+    except (OSError, tk.TclError):
+        pass
+    if sys.platform == "win32":
+        try:
+            window.iconbitmap(default=resource_path("app_icon.ico"))
+        except (OSError, tk.TclError):
+            pass
 
 
 def _load_heavy_modules():
@@ -169,6 +196,12 @@ class TrackItem:
         self.trim_end = 0.0
         self.duration = 0.0
         self.enabled = True
+        self.volume = 1.0
+        self.fade_in = 0.01
+        self.fade_out = 0.01
+        self.effects = {}
+        self.metadata = {}
+        self.missing = not os.path.isfile(filepath)
 
     def analyze(self):
         if self.filetype != "audio": return
@@ -340,10 +373,28 @@ class Stage0Project(tk.Frame):
         styled_entry(row1, textvariable=self.proj_name_var, width=25).pack(side=tk.LEFT, padx=6)
         styled_button(row1, "새 프로젝트", self.new_project, "primary", padx=10).pack(side=tk.LEFT, padx=4)
         styled_button(row1, "불러오기", self.load_project, padx=10).pack(side=tk.LEFT, padx=2)
+        styled_button(row1, "누락 파일 재연결", self.relink_missing_files, padx=10).pack(side=tk.LEFT, padx=2)
         self.save_btn = styled_button(row1, "저장", self.save_project, padx=10)
         self.save_btn.pack(side=tk.LEFT, padx=2)
         self.proj_status = styled_label(row1, "", size=9, color=THEME['success'], bg=THEME['bg_card'])
         self.proj_status.pack(side=tk.RIGHT)
+        self.donation_btn = tk.Button(
+            row1,
+            text="☕  후원 링크",
+            command=self._open_donation_link,
+            font=_font(9),
+            bg=THEME['bg_card'],
+            fg=THEME['fg_dim'],
+            activebackground=THEME['bg_hover'],
+            activeforeground=THEME['fg'],
+            relief=tk.FLAT,
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="hand2",
+            padx=6,
+            pady=2,
+        )
+        self.donation_btn.pack(side=tk.RIGHT, padx=(8, 2))
 
         row_path = tk.Frame(proj_frame, bg=THEME['bg_card'])
         row_path.pack(fill=tk.X, pady=(6, 2))
@@ -422,6 +473,17 @@ class Stage0Project(tk.Frame):
 
         self._setup_dnd()
 
+    def _open_donation_link(self):
+        try:
+            if not webbrowser.open_new_tab(DONATION_URL):
+                raise RuntimeError("기본 브라우저를 열 수 없습니다.")
+        except Exception as exc:
+            messagebox.showerror(
+                "후원 링크",
+                f"후원 링크를 열지 못했습니다.\n\n{DONATION_URL}\n\n{exc}",
+                parent=self,
+            )
+
     def _setup_dnd(self):
         try:
             from tkinterdnd2 import DND_FILES
@@ -467,6 +529,26 @@ class Stage0Project(tk.Frame):
                              values=(item.filename, tag.upper(), "-", "-", "-", "-"), tags=(tag,))
         self.status_label.configure(text=f"{len(self.app.tracks)}개 파일 ({added}개 추가)")
 
+    def add_missing_file(self, filepath, file_kind=None):
+        if any(t.filepath == filepath for t in self.app.tracks):
+            return
+        item = TrackItem(filepath)
+        item.missing = True
+        if file_kind in ("audio", "image", "video"):
+            item.filetype = file_kind
+        self.app.tracks.append(item)
+        self.tree.insert(
+            "", tk.END, iid=str(id(item)),
+            values=(
+                item.filename or os.path.basename(filepath),
+                item.filetype.upper(), "누락", "-", "-", "-"
+            ),
+            tags=("missing",),
+        )
+        self.tree.tag_configure(
+            "missing", foreground=THEME['danger']
+        )
+
     def clear_files(self):
         self.app.tracks.clear()
         for i in self.tree.get_children(): self.tree.delete(i)
@@ -497,6 +579,18 @@ class Stage0Project(tk.Frame):
             m = "Maj" if a.mode == "major" else "Min"
             d = f"{int(a.duration//60)}:{int(a.duration%60):02d}"
             self.tree.item(iid, values=(t.filename, "AUDIO", d, f"{a.bpm:.0f}", f"{a.key} {m}", a.camelot))
+        else:
+            status = "누락" if getattr(t, 'missing', False) else "-"
+            self.tree.item(
+                iid,
+                values=(
+                    t.filename, t.filetype.upper(), status,
+                    "-", "-", "-",
+                ),
+                tags=("missing",) if getattr(t, 'missing', False) else (
+                    t.filetype,
+                ),
+            )
 
     def _done(self):
         self.analyze_btn.configure(state=tk.NORMAL, text="분석 시작")
@@ -542,8 +636,17 @@ class Stage0Project(tk.Frame):
             self.target_h_var.set(str(int(data.get('target_duration', 3600) // 3600)))
             self.target_m_var.set(str(int(data.get('target_duration', 3600) % 3600) // 60))
             self.tolerance_var.set(str(int(data.get('tolerance', 0.10) * 100)))
-            existing_files = {f['original'] for f in data.get('files', [])}
+            existing_files = {
+                f['original'] for f in self.app.project.all_files
+                if f.get('original') and os.path.isfile(f['original'])
+            }
             self.add_files(list(existing_files))
+            for file_info in self.app.project.all_files:
+                filepath = file_info.get('original', '')
+                if filepath and not os.path.isfile(filepath):
+                    self.add_missing_file(
+                        filepath, file_info.get('type')
+                    )
 
             for t in self.app.tracks:
                 if t.filetype == "audio" and not t.analysis:
@@ -554,7 +657,7 @@ class Stage0Project(tk.Frame):
                         t.trim_end = a.duration
                         self._update_tree(t)
 
-            self.app.video_groups = data.get('video_groups', [])
+            self.app.video_groups = self.app.project.video_groups
 
             for vg in self.app.video_groups:
                 for t in vg.get('tracks', []):
@@ -570,6 +673,8 @@ class Stage0Project(tk.Frame):
             self.status_label.configure(text=f"로드 완료: {n}곡 분석 결과 복원")
             if n > 0:
                 self.app.enable_next(True)
+            self.app.restore_project_state(self.app.project.app_state)
+            self.app.set_dirty(False)
         except Exception as e:
             messagebox.showerror("오류", str(e))
 
@@ -592,8 +697,34 @@ class Stage0Project(tk.Frame):
         for t in self.app.tracks:
             if t.analysis:
                 analyses[t.filepath] = t.analysis
-        video_groups = self.app.video_groups
+        video_groups = []
+        for group in self.app.video_groups:
+            snapshot = dict(group)
+            snapshot['tracks'] = [
+                dict(track) for track in group.get('tracks', [])
+            ]
+            snapshot['clips'] = [
+                dict(clip) for clip in group.get('clips', [])
+            ]
+            video_groups.append(snapshot)
         filepaths = [t.filepath for t in self.app.tracks]
+        for group in video_groups:
+            filepaths.extend(
+                clip.get('filepath', '')
+                for clip in group.get('clips', [])
+                if clip.get('filepath')
+            )
+        if len(self.app.stages) > 4:
+            design_stage = self.app.stages[4]
+            filepaths.extend(
+                path for path in (
+                    design_stage.bg_image.get(),
+                    design_stage.album_image_var.get(),
+                    design_stage.logo_image_var.get(),
+                ) if path
+            )
+        app_state = self.app.collect_project_state()
+        self.app._project_save_generation += 1
 
         self.save_btn.configure(state=tk.DISABLED)
         self.proj_status.configure(text="저장 중...")
@@ -603,12 +734,18 @@ class Stage0Project(tk.Frame):
 
         def run():
             try:
-                self.app.project.backup_files(filepaths)
-                self.app.project.save(analyses=analyses, video_groups=video_groups,
-                                      progress_callback=_on_progress)
+                with self.app._project_save_lock:
+                    self.app.project.backup_files(filepaths)
+                    self.app.project.save(
+                        analyses=analyses,
+                        video_groups=video_groups,
+                        app_state=app_state,
+                        progress_callback=_on_progress,
+                    )
                 self.after(0, lambda: (
                     self.proj_status.configure(text="저장 완료!"),
                     self.save_btn.configure(state=tk.NORMAL),
+                    self.app.set_dirty(False),
                 ))
             except Exception as e:
                 self.after(0, lambda: (
@@ -618,6 +755,36 @@ class Stage0Project(tk.Frame):
                 ))
 
         threading.Thread(target=run, daemon=True).start()
+
+    def relink_missing_files(self):
+        if not self.app.project or not self.app.project.project_dir:
+            messagebox.showinfo("재연결", "먼저 프로젝트를 불러오세요.")
+            return
+        missing = self.app.project.missing_paths()
+        if not missing:
+            messagebox.showinfo("재연결", "누락된 미디어 파일이 없습니다.")
+            return
+        search_dir = filedialog.askdirectory(title="누락 파일을 검색할 폴더 선택")
+        if not search_dir:
+            return
+        replacements = self.app.project.relink_missing(search_dir)
+        for track in self.app.tracks:
+            if track.filepath in replacements:
+                track.filepath = replacements[track.filepath]
+                track.filename = os.path.basename(track.filepath)
+                track.missing = False
+                self._update_tree(track)
+        self.app.video_groups = self.app.project.video_groups
+        self.proj_status.configure(
+            text=f"재연결 완료: {len(replacements)}/{len(missing)}개"
+        )
+        if replacements:
+            self.app.persist_video_groups()
+        if len(replacements) < len(missing):
+            messagebox.showwarning(
+                "일부 파일 누락",
+                f"{len(missing) - len(replacements)}개 파일을 찾지 못했습니다.",
+            )
 
 
 # ─── Stage 1: 자동 분배 ───
@@ -678,6 +845,15 @@ class Stage1Distribute(tk.Frame):
         ctrl = tk.Frame(self.auto_frame, bg=THEME['bg_main'])
         ctrl.pack(fill=tk.X, pady=(0, 8))
         styled_button(ctrl, "자동 분배 실행", self.run_distribute, "primary", padx=18, pady=6).pack(side=tk.LEFT)
+        self.flow_preset_var = tk.StringVar(value="균형")
+        styled_option_menu(
+            ctrl, self.flow_preset_var, ["균형", "점진 상승", "차분함", "중반 피크"]
+        ).pack(side=tk.LEFT, padx=(8, 4))
+        self.avoid_artist_var = tk.BooleanVar(value=True)
+        styled_checkbutton(
+            ctrl, "같은 아티스트 연속 방지", self.avoid_artist_var,
+            bg=THEME['bg_main'],
+        ).pack(side=tk.LEFT, padx=4)
         self.dist_status = styled_label(ctrl, "", size=10, color=THEME['fg_dim'], bg=THEME['bg_main'])
         self.dist_status.pack(side=tk.LEFT, padx=12)
 
@@ -712,7 +888,7 @@ class Stage1Distribute(tk.Frame):
         left = tk.Frame(body, bg=THEME['bg_card'])
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
         styled_label(left, "전체 곡  (드래그로 그룹에 이동)", size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
-        self._manual_track_list = tk.Listbox(left, selectmode=tk.SINGLE,
+        self._manual_track_list = tk.Listbox(left, selectmode=tk.EXTENDED,
                                              bg=THEME['bg_input'], fg=THEME['fg'],
                                              selectbackground=THEME['select'], selectforeground="#ffffff",
                                              font=_font(10), relief=tk.FLAT, activestyle="none",
@@ -727,6 +903,7 @@ class Stage1Distribute(tk.Frame):
         mid.pack(side=tk.LEFT, padx=4)
 
         right = tk.Frame(body, bg=THEME['bg_card'])
+        self._manual_group_panel = right
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
         styled_label(right, "그룹 곡  (드래그로 순서 변경)", size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
         self._manual_group_tabs = tk.Frame(right, bg=THEME['bg_card'])
@@ -741,10 +918,14 @@ class Stage1Distribute(tk.Frame):
         self._manual_group_list.bind('<ButtonPress-1>', self._group_list_press)
         self._manual_group_list.bind('<B1-Motion>', self._group_list_drag)
         self._manual_group_list.bind('<ButtonRelease-1>', self._group_list_release)
+        self._manual_group_list.bind('<Escape>', lambda e: self._clear_group_drag())
 
         self._drag_label = None
         self._track_drag_data = {}
         self._group_drag_data = {}
+        self._group_drop_indicator = None
+        self._group_drop_target = None
+        self._empty_group_drop_hint = None
 
     def _refresh_manual(self):
         audio_tracks = [t for t in self.app.tracks if t.filetype == "audio" and t.analysis]
@@ -770,18 +951,31 @@ class Stage1Distribute(tk.Frame):
             w.destroy()
         for i, g in enumerate(self.app.video_groups):
             n = len(g.get('tracks', []))
-            btn = styled_button(self._manual_group_tabs, f"Mix {i+1}",
+            btn = styled_button(
+                                self._manual_group_tabs,
+                                f"{g.get('name') or f'Mix {i+1}'} ({n})",
                                 lambda idx=i: self._select_manual_group(idx),
                                 "primary" if i == self.manual_group_idx else "primary",
                                 padx=8, pady=2)
             btn.pack(side=tk.LEFT, padx=(0, 4))
+            btn._group_index = i
             if i != self.manual_group_idx:
                 btn.configure(bg=THEME['bg_input'], fg=THEME['fg'])
+            if i == self._group_drop_target:
+                btn.configure(
+                    bg=THEME['accent_h'], fg="#ffffff",
+                    highlightthickness=2,
+                    highlightbackground=THEME['warning'],
+                )
 
     def _refresh_group_list(self):
+        if self._empty_group_drop_hint is not None:
+            self._empty_group_drop_hint.destroy()
+            self._empty_group_drop_hint = None
         self._manual_group_list.delete(0, tk.END)
         if self.manual_group_idx < 0 or self.manual_group_idx >= len(self.app.video_groups):
             self._manual_group_list._group_items = []
+            self._show_empty_group_hint(create_group=True)
             return
         g = self.app.video_groups[self.manual_group_idx]
         tracks = g.get('tracks', [])
@@ -793,6 +987,32 @@ class Stage1Distribute(tk.Frame):
             else:
                 self._manual_group_list.insert(tk.END, f"{i+1}. {t.get('filename','')} (미분석)")
         self._manual_group_list._group_items = tracks
+        if not tracks:
+            self._manual_group_list.insert(tk.END, "여기에 놓기")
+            self._manual_group_list.itemconfigure(
+                0, foreground=THEME['fg_dimmer']
+            )
+            self._show_empty_group_hint(create_group=False)
+
+    def _show_empty_group_hint(self, create_group):
+        text = (
+            "새 그룹을 생성하여 여기에 이동"
+            if create_group else "여기에 놓기"
+        )
+        self._empty_group_drop_hint = tk.Label(
+            self._manual_group_list,
+            text=text,
+            bg=THEME['bg_hover'],
+            fg=THEME['fg_dim'],
+            font=_font(10, bold=True),
+            relief=tk.FLAT,
+            highlightthickness=2,
+            highlightbackground=THEME['border'],
+            cursor="hand2",
+        )
+        self._empty_group_drop_hint.place(
+            relx=0, rely=0, relwidth=1, relheight=1
+        )
 
     def _select_manual_group(self, idx):
         self.manual_group_idx = idx
@@ -806,8 +1026,9 @@ class Stage1Distribute(tk.Frame):
             self._refresh_group_tabs()
 
     def _manual_add_group(self):
+        name = self._next_group_name()
         self.app.video_groups.append({
-            'name': f'Mix {len(self.app.video_groups)+1}',
+            'name': name,
             'tracks': [],
             'total_duration': 0,
             'bg_image': '',
@@ -815,39 +1036,113 @@ class Stage1Distribute(tk.Frame):
         self.manual_group_idx = len(self.app.video_groups) - 1
         self._refresh_manual()
         self.app.enable_next(bool(self.app.video_groups))
+        self.app.persist_video_groups()
 
     def _manual_del_group(self):
         if self.manual_group_idx < 0 or self.manual_group_idx >= len(self.app.video_groups):
             return
         self.app.video_groups.pop(self.manual_group_idx)
-        if self.manual_group_idx >= len(self.app.video_groups):
+        if not self.app.video_groups:
+            self.manual_group_idx = -1
+        elif self.manual_group_idx >= len(self.app.video_groups):
             self.manual_group_idx = max(0, len(self.app.video_groups) - 1)
         self._refresh_manual()
         self.app.enable_next(bool(self.app.video_groups))
+        self.app.persist_video_groups()
 
     def _manual_move_to_group(self):
         sel = list(self._manual_track_list.curselection())
-        if not sel or self.manual_group_idx < 0 or self.manual_group_idx >= len(self.app.video_groups):
-            return
+        self._move_unassigned_to_group(sel)
+
+    def _next_group_name(self):
+        existing = {
+            str(group.get('name', '')).casefold()
+            for group in self.app.video_groups
+        }
+        used_numbers = []
+        for name in existing:
+            if name.startswith("mix "):
+                try:
+                    used_numbers.append(int(name[4:]))
+                except ValueError:
+                    pass
+        number = max(used_numbers, default=0) + 1
+        while f"mix {number}".casefold() in existing:
+            number += 1
+        return f"Mix {number}"
+
+    def _move_unassigned_to_group(self, indices):
+        """Validate first, then create/append as one logical transaction."""
         items = getattr(self._manual_track_list, '_track_items', [])
-        g = self.app.video_groups[self.manual_group_idx]
-        to_add = []
-        for idx in sorted(sel, reverse=True):
-            if idx < len(items):
-                t = items[idx]
-                to_add.append({
-                    'track': t,
-                    'analysis': t.analysis,
-                    'duration': t.duration,
-                    'filename': t.filename,
-                    'filepath': t.filepath,
-                    'trim_start': t.trim_start,
-                    'trim_end': t.trim_end if t.trim_end > 0 else t.duration,
+        ordered_indices = sorted(set(indices))
+        selected = [
+            items[index] for index in ordered_indices
+            if 0 <= index < len(items)
+        ]
+        if not selected:
+            return False
+        payload = []
+        try:
+            for track in selected:
+                if track.analysis is None or not track.filepath:
+                    raise ValueError("분석되지 않았거나 경로가 없는 곡입니다.")
+                payload.append({
+                    'track': track,
+                    'analysis': track.analysis,
+                    'duration': track.duration,
+                    'filename': track.filename,
+                    'filepath': track.filepath,
+                    'trim_start': track.trim_start,
+                    'trim_end': (
+                        track.trim_end if track.trim_end > 0
+                        else track.duration
+                    ),
+                    'volume': getattr(track, 'volume', 1.0),
+                    'fade_in': getattr(track, 'fade_in', 0.01),
+                    'fade_out': getattr(track, 'fade_out', 0.01),
                 })
-        for ti in to_add:
-            g['tracks'].append(ti)
-        g['total_duration'] = sum(ti.get('duration', 0) for ti in g['tracks'])
+        except (AttributeError, TypeError, ValueError) as error:
+            messagebox.showerror("이동 실패", str(error))
+            return False
+
+        created_group = False
+        if not self.app.video_groups:
+            group = {
+                'name': self._next_group_name(),
+                'tracks': [],
+                'total_duration': 0,
+                'bg_image': '',
+            }
+            target_index = 0
+            created_group = True
+        else:
+            target_index = self.manual_group_idx
+            if not (0 <= target_index < len(self.app.video_groups)):
+                target_index = 0
+            group = self.app.video_groups[target_index]
+
+        try:
+            if created_group:
+                self.app.video_groups.append(group)
+            group['tracks'].extend(payload)
+            group['total_duration'] = sum(
+                max(
+                    0,
+                    item.get('trim_end', item.get('duration', 0))
+                    - item.get('trim_start', 0),
+                )
+                for item in group['tracks']
+            )
+            self.manual_group_idx = target_index
+        except Exception:
+            if created_group and group in self.app.video_groups:
+                self.app.video_groups.remove(group)
+            raise
+
         self._refresh_manual()
+        self.app.enable_next(True)
+        self.app.persist_video_groups()
+        return True
 
     def _manual_move_from_group(self):
         sel = list(self._manual_group_list.curselection())
@@ -860,12 +1155,17 @@ class Stage1Distribute(tk.Frame):
                 tracks.pop(idx)
         g['total_duration'] = sum(ti.get('duration', 0) for ti in tracks)
         self._refresh_manual()
+        self.app.persist_video_groups()
 
     def _show_drag_label(self, widget, text, x, y):
         if self._drag_label is None:
             self._drag_label = tk.Toplevel(widget)
             self._drag_label.overrideredirect(True)
             self._drag_label.configure(bg=THEME['accent'])
+            try:
+                self._drag_label.attributes('-alpha', 0.78)
+            except tk.TclError:
+                pass
             lbl = tk.Label(self._drag_label, text=text, bg=THEME['accent'], fg="#ffffff",
                            font=_font(10, bold=True), padx=8, pady=2)
             lbl.pack()
@@ -888,10 +1188,19 @@ class Stage1Distribute(tk.Frame):
         lb = self._manual_track_list
         idx = lb.nearest(event.y)
         if idx >= 0:
-            lb.selection_clear(0, tk.END)
-            lb.selection_set(idx)
+            if idx not in lb.curselection():
+                if not (event.state & (0x0001 | 0x0004)):
+                    lb.selection_clear(0, tk.END)
+                lb.selection_set(idx)
             lb.activate(idx)
-        self._track_drag_data = {'start_idx': idx, 'moved': False, 'widget': lb}
+        self._track_drag_data = {
+            'start_idx': idx, 'moved': False, 'widget': lb,
+            'valid_target': False,
+        }
+        try:
+            lb.grab_set()
+        except tk.TclError:
+            pass
 
     def _track_list_drag(self, event):
         dd = self._track_drag_data
@@ -903,6 +1212,10 @@ class Stage1Distribute(tk.Frame):
         if not sel:
             return
         dd['moved'] = True
+        dd['valid_target'] = self._is_group_panel_target(
+            event.x_root, event.y_root
+        )
+        self._set_group_panel_drop_state(dd['valid_target'])
         first = sel[0]
         if first < len(items):
             name = items[first].filename
@@ -912,33 +1225,59 @@ class Stage1Distribute(tk.Frame):
     def _track_list_release(self, event):
         dd = self._track_drag_data
         self._hide_drag_label()
+        self._set_group_panel_drop_state(False)
+        widget = dd.get('widget')
+        if widget:
+            try:
+                if widget.grab_current() == widget:
+                    widget.grab_release()
+            except tk.TclError:
+                pass
         if not dd.get('moved') or not dd.get('widget'):
             self._track_drag_data = {}
             return
 
         lb = dd['widget']
         sel = list(lb.curselection())
-        items = getattr(lb, '_track_items', [])
-        if not sel or self.manual_group_idx < 0 or self.manual_group_idx >= len(self.app.video_groups):
+        if not sel or not dd.get('valid_target'):
             self._track_drag_data = {}
             return
-
-        g = self.app.video_groups[self.manual_group_idx]
-        to_add = []
-        for idx in sorted(sel):
-            if idx < len(items):
-                t = items[idx]
-                to_add.append({
-                    'track': t, 'analysis': t.analysis, 'duration': t.duration,
-                    'filename': t.filename, 'filepath': t.filepath,
-                    'trim_start': t.trim_start,
-                    'trim_end': t.trim_end if t.trim_end > 0 else t.duration,
-                })
-        for ti in to_add:
-            g['tracks'].append(ti)
-        g['total_duration'] = sum(ti.get('duration', 0) for ti in g['tracks'])
         self._track_drag_data = {}
-        self._refresh_manual()
+        self._move_unassigned_to_group(sel)
+
+    def _clear_track_drag(self):
+        self._hide_drag_label()
+        self._set_group_panel_drop_state(False)
+        widget = self._track_drag_data.get('widget') if self._track_drag_data else None
+        if widget:
+            try:
+                if widget.grab_current() == widget:
+                    widget.grab_release()
+            except tk.TclError:
+                pass
+        self._track_drag_data = {}
+
+    def _is_group_panel_target(self, root_x, root_y):
+        try:
+            left = self._manual_group_panel.winfo_rootx()
+            top = self._manual_group_panel.winfo_rooty()
+            right = left + self._manual_group_panel.winfo_width()
+            bottom = top + self._manual_group_panel.winfo_height()
+            return left <= root_x <= right and top <= root_y <= bottom
+        except tk.TclError:
+            return False
+
+    def _set_group_panel_drop_state(self, active):
+        try:
+            color = THEME['accent'] if active else THEME['border']
+            self._manual_group_list.configure(highlightbackground=color)
+            if self._empty_group_drop_hint is not None:
+                self._empty_group_drop_hint.configure(
+                    highlightbackground=color,
+                    bg=THEME['bg_hover'] if active else THEME['bg_input'],
+                )
+        except tk.TclError:
+            pass
 
     def _group_list_press(self, event):
         lb = self._manual_group_list
@@ -947,71 +1286,185 @@ class Stage1Distribute(tk.Frame):
             lb.selection_clear(0, tk.END)
             lb.selection_set(idx)
             lb.activate(idx)
-        self._group_drag_data = {'start_idx': idx, 'moved': False, 'widget': lb}
+        self._clear_group_drag()
+        self._group_drag_data = {
+            'start_idx': idx, 'moved': False, 'widget': lb,
+            'insert_at': None, 'source_group': self.manual_group_idx,
+            'item': (
+                self.app.video_groups[self.manual_group_idx]['tracks'][idx]
+                if (
+                    0 <= self.manual_group_idx < len(self.app.video_groups)
+                    and 0 <= idx < len(
+                        self.app.video_groups[self.manual_group_idx].get(
+                            'tracks', []
+                        )
+                    )
+                )
+                else None
+            ),
+        }
+        try:
+            lb.grab_set()
+        except tk.TclError:
+            pass
+        lb.configure(cursor='hand2')
 
     def _group_list_drag(self, event):
         dd = self._group_drag_data
         if not dd.get('widget'):
             return
         lb = dd['widget']
-        sel = list(lb.curselection())
-        if not sel:
+        start = dd.get('start_idx', -1)
+        if start < 0:
             return
         dd['moved'] = True
+        target = lb.winfo_containing(event.x_root, event.y_root)
+        while target is not None and not hasattr(target, '_group_index'):
+            target = target.master
+        if target is not None:
+            target_index = target._group_index
+            self._group_drop_target = target_index
+            if target_index != self.manual_group_idx:
+                self.manual_group_idx = target_index
+                self._refresh_group_tabs()
+                self._refresh_group_list()
+            dd['insert_at'] = len(
+                self.app.video_groups[target_index].get('tracks', [])
+            )
+            self._show_group_drop_indicator(2)
+            return
+        if self._group_drop_target is not None:
+            self._group_drop_target = None
+            self._refresh_group_tabs()
         g = self.app.video_groups[self.manual_group_idx] if 0 <= self.manual_group_idx < len(self.app.video_groups) else None
         if not g:
             return
         tracks = g.get('tracks', [])
-        first = sel[0]
-        end = lb.nearest(event.y)
-        if first < len(tracks):
-            name = tracks[first].get('filename', '')
-            if end != first and 0 <= end < len(tracks):
-                lb.selection_clear(0, tk.END)
-                lb.selection_set(end)
-                lb.activate(end)
-                if end < first:
-                    pos_label = f"위로 → [{end+1}]"
-                else:
-                    pos_label = f"아래로 → [{end+1}]"
-                self._show_drag_label(lb, f"{name}  {pos_label}", event.x, event.y)
-            else:
-                self._show_drag_label(lb, f"순서 변경: {name}", event.x, event.y)
+        if dd.get('item') is not None:
+            if (
+                event.x < 0 or event.x > lb.winfo_width()
+                or event.y < -20 or event.y > lb.winfo_height() + 20
+            ):
+                dd['insert_at'] = None
+                if self._group_drop_indicator is not None:
+                    self._group_drop_indicator.place_forget()
+                self._hide_drag_label()
+                return
+            insert_at, indicator_y = self._group_insert_position(event.y)
+            dd['insert_at'] = insert_at
+            self._show_group_drop_indicator(indicator_y)
+            name = dd['item'].get('filename', '')
+            position = min(insert_at + 1, len(tracks))
+            self._show_drag_label(
+                lb, f"{name}  →  {position}번 위치", event.x, event.y
+            )
+            lb.configure(cursor='fleur')
 
     def _group_list_release(self, event):
         dd = self._group_drag_data
-        self._hide_drag_label()
         if not dd.get('moved') or not dd.get('widget'):
-            self._group_drag_data = {}
+            self._clear_group_drag()
             return
 
-        lb = dd['widget']
         start = dd['start_idx']
-        end = lb.nearest(event.y)
-        if end == start or end < 0:
-            self._group_drag_data = {}
+        source_group = dd.get('source_group', self.manual_group_idx)
+        insert_at = dd.get('insert_at')
+        if insert_at is None:
+            self._clear_group_drag()
             return
 
         if self.manual_group_idx < 0 or self.manual_group_idx >= len(self.app.video_groups):
-            self._group_drag_data = {}
+            self._clear_group_drag()
             return
-        g = self.app.video_groups[self.manual_group_idx]
-        tracks = g.get('tracks', [])
-        sel = sorted(list(lb.curselection()))
-        if not sel:
-            self._group_drag_data = {}
+        source = self.app.video_groups[source_group]
+        target = self.app.video_groups[self.manual_group_idx]
+        source_tracks = source.get('tracks', [])
+        target_tracks = target.get('tracks', [])
+        if not (0 <= start < len(source_tracks)):
+            self._clear_group_drag()
             return
 
-        block = [tracks[i] for i in sel if i < len(tracks)]
-        for i in reversed(sel):
-            if i < len(tracks):
-                tracks.pop(i)
-        insert_at = min(end, len(tracks))
-        for j, item in enumerate(block):
-            tracks.insert(insert_at + j, item)
-
-        self._group_drag_data = {}
+        item = source_tracks.pop(start)
+        if source_group == self.manual_group_idx and insert_at > start:
+            insert_at -= 1
+        insert_at = max(0, min(insert_at, len(target_tracks)))
+        target_tracks.insert(insert_at, item)
+        source['total_duration'] = sum(
+            max(0, t.get('trim_end', t.get('duration', 0))
+                - t.get('trim_start', 0))
+            for t in source_tracks
+        )
+        target['total_duration'] = sum(
+            max(0, t.get('trim_end', t.get('duration', 0))
+                - t.get('trim_start', 0))
+            for t in target_tracks
+        )
+        self._clear_group_drag()
         self._refresh_group_list()
+        self._manual_group_list.selection_set(insert_at)
+        self._manual_group_list.activate(insert_at)
+        self.app.persist_video_groups()
+
+    def _group_insert_position(self, pointer_y):
+        lb = self._manual_group_list
+        if (
+            0 <= self.manual_group_idx < len(self.app.video_groups)
+            and not self.app.video_groups[self.manual_group_idx].get('tracks')
+        ):
+            return 0, max(2, lb.winfo_height() // 2)
+        size = lb.size()
+        if size <= 0:
+            return 0, 2
+        first_box = lb.bbox(0)
+        last_box = lb.bbox(size - 1)
+        if not first_box or not last_box:
+            return 0, 2
+        if pointer_y <= first_box[1]:
+            return 0, first_box[1]
+        last_bottom = last_box[1] + last_box[3]
+        if pointer_y >= last_bottom:
+            return size, last_bottom
+        idx = max(0, min(lb.nearest(pointer_y), size - 1))
+        box = lb.bbox(idx)
+        if not box:
+            return size, last_bottom
+        before = pointer_y < box[1] + box[3] / 2
+        return (idx, box[1]) if before else (idx + 1, box[1] + box[3])
+
+    def _show_group_drop_indicator(self, y):
+        lb = self._manual_group_list
+        if self._group_drop_indicator is None:
+            shade = tk.Frame(lb, bg='#17181b', height=10)
+            line = tk.Frame(shade, bg=THEME['accent'], height=3)
+            line.place(relx=0.03, rely=0.5, relwidth=0.94, anchor=tk.W)
+            self._group_drop_indicator = shade
+        self._group_drop_indicator.place(
+            x=2, y=max(0, int(y) - 5), relwidth=1.0, width=-4, height=10
+        )
+        self._group_drop_indicator.lift()
+        self._group_drop_indicator.update_idletasks()
+
+    def _clear_group_drag(self):
+        self._hide_drag_label()
+        if self._group_drop_indicator is not None:
+            self._group_drop_indicator.place_forget()
+        widget = self._group_drag_data.get('widget') if self._group_drag_data else None
+        if widget:
+            try:
+                if widget.grab_current() == widget:
+                    widget.grab_release()
+                widget.configure(cursor='')
+            except tk.TclError:
+                pass
+        self._group_drag_data = {}
+        if self._group_drop_target is not None:
+            self._group_drop_target = None
+            if self.winfo_exists():
+                self._refresh_group_tabs()
+
+    def on_hide(self):
+        self._clear_group_drag()
+        self._clear_track_drag()
 
     def refresh(self):
         if self.distribute_mode == "auto":
@@ -1062,22 +1515,39 @@ class Stage1Distribute(tk.Frame):
         tol = self.app.stages[0].get_tolerance()
         n = len(audio_tracks)
         self.dist_status.configure(text=f"분배 중... (0/{n}곡)")
+        preset_map = {
+            "균형": "balanced", "점진 상승": "build_up",
+            "차분함": "calm", "중반 피크": "peak_middle",
+        }
+        flow_preset = preset_map.get(self.flow_preset_var.get(), "balanced")
+        avoid_same_artist = self.avoid_artist_var.get()
 
         def _on_progress(current, total, msg):
             self.after(0, lambda c=current, t=total, m=msg: self.dist_status.configure(text=f"{m} {c+1}/{t}"))
 
         def run():
-            groups = _distribute_tracks(audio_tracks, target, tol, progress_callback=_on_progress)
-            for g in groups:
-                for ti in g['tracks']:
-                    ti['analysis'] = ti['track'].analysis
+            try:
+                groups = _distribute_tracks(
+                    audio_tracks, target, tol, progress_callback=_on_progress,
+                    preset=flow_preset,
+                    avoid_same_artist=avoid_same_artist,
+                )
+                for g in groups:
+                    for ti in g['tracks']:
+                        ti['analysis'] = ti['track'].analysis
 
-            def _apply():
-                self.app.video_groups = groups
-                self.refresh()
-                self.dist_status.configure(text=f"{len(groups)}개 영상 생성됨")
-                self.app.enable_next(bool(groups))
-            self.after(0, _apply)
+                def _apply():
+                    self.app.video_groups = groups
+                    self.refresh()
+                    self.dist_status.configure(text=f"{len(groups)}개 영상 생성됨")
+                    self.app.enable_next(bool(groups))
+                    self.app.persist_video_groups()
+                self.after(0, _apply)
+            except Exception as e:
+                def _show_error(error=e):
+                    self.dist_status.configure(text="분배 실패")
+                    messagebox.showerror("분배 오류", str(error))
+                self.after(0, _show_error)
         threading.Thread(target=run, daemon=True).start()
 
 
@@ -1085,6 +1555,7 @@ class Stage1Distribute(tk.Frame):
 
 _TIMELINE_COLORS = ['#5865f2', '#57f287', '#fee75c', '#ed4245', '#eb459e',
                      '#ff9063', '#3ba55c', '#5865f2', '#e67e22', '#9b59b6']
+MIN_TRIM_SECONDS = 0.25
 
 def _fmt_ts(sec):
     m = int(sec) // 60
@@ -1101,8 +1572,20 @@ class Stage2MusicEdit(tk.Frame):
         self.tl_drag = None
         self.tl_px_per_sec = 8
         self.tl_scroll_x = 0
+        self.playhead_sec = 0.0
+        self._drop_index = None
         self.LANE_H = 56
         self._waveform_cache = {}
+        self._waveform_loading = set()
+        self._history = []
+        self._history_index = -1
+        self._preview_player = None
+        self._audio_preview_after_id = None
+        self._audio_preview_started = 0.0
+        self._audio_preview_duration = 0.0
+        self._audio_preview_timeline_start = 0.0
+        self._updating_track_controls = False
+        self._zoom_after_id = None
         self.build_ui()
 
     def build_ui(self):
@@ -1136,22 +1619,94 @@ class Stage2MusicEdit(tk.Frame):
         self.tl_canvas.bind("<ButtonPress-1>", self._tl_press)
         self.tl_canvas.bind("<B1-Motion>", self._tl_drag_motion)
         self.tl_canvas.bind("<ButtonRelease-1>", self._tl_release)
+        self.tl_canvas.bind("<Double-Button-1>", self._tl_double_click)
         self.tl_canvas.bind("<Motion>", self._tl_hover)
+        self.tl_canvas.bind("<Leave>", lambda e: self.tl_canvas.configure(cursor=''))
         self.tl_canvas.bind("<MouseWheel>", self._tl_scroll)
         self.tl_canvas.bind("<Button-4>", lambda e: self._tl_scroll_linux(1))
         self.tl_canvas.bind("<Button-5>", lambda e: self._tl_scroll_linux(-1))
+        self.tl_canvas.bind("<Escape>", lambda e: self._cancel_tl_drag())
 
         tf = tk.Frame(self, bg=THEME['bg_main'])
         tf.pack(fill=tk.X, padx=24, pady=(0, 8))
-        styled_label(tf, "트랙을 클릭하면 편집 모달이 열립니다 | 가장자리를 드래그하면 빠른 트림",
+        styled_label(tf, "가장자리: 트림 (기본 0.1초 / Shift 0.01초 / Alt 0.001초)  |  본문 드래그: 순서 변경",
                      size=10, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(side=tk.LEFT)
 
         btn_row = tk.Frame(self, bg=THEME['bg_main'])
         btn_row.pack(fill=tk.X, padx=24, pady=(0, 10))
+        styled_button(btn_row, "▶ 선택 미리듣기", self._play_selection, "primary", padx=10).pack(side=tk.LEFT)
+        styled_button(btn_row, "■ 정지", self._stop_preview, padx=10).pack(side=tk.LEFT, padx=(4, 12))
+        styled_button(btn_row, "↶ 실행 취소", self._undo, padx=10).pack(side=tk.LEFT)
+        styled_button(btn_row, "↷ 다시 실행", self._redo, padx=10).pack(side=tk.LEFT, padx=4)
         styled_button(btn_row, "▲ 순서 변경", self._move_up, padx=10).pack(side=tk.LEFT)
         styled_button(btn_row, "▼ 순서 변경", self._move_down, padx=10).pack(side=tk.LEFT, padx=4)
+        self.bind_all("<Control-z>", lambda e: self._undo())
+        self.bind_all("<Control-y>", lambda e: self._redo())
+
+        edit_row = tk.Frame(self, bg=THEME['bg_card'])
+        edit_row.pack(fill=tk.X, padx=24, pady=(0, 10))
+        self.track_volume_var = tk.DoubleVar(value=1.0)
+        self.track_fade_in_var = tk.DoubleVar(value=0.01)
+        self.track_fade_out_var = tk.DoubleVar(value=0.01)
+        self.track_edit_label = styled_label(
+            edit_row, "선택 곡 설정", size=10, bold=True,
+            bg=THEME['bg_card'],
+        )
+        self.track_edit_label.pack(side=tk.LEFT, padx=(10, 12))
+        for label, variable, upper, resolution in (
+            ("볼륨", self.track_volume_var, 2.0, 0.05),
+            ("페이드 인", self.track_fade_in_var, 10.0, 0.1),
+            ("페이드 아웃", self.track_fade_out_var, 10.0, 0.1),
+        ):
+            styled_label(
+                edit_row, label, size=9, bg=THEME['bg_card']
+            ).pack(side=tk.LEFT, padx=(8, 2))
+            scale = styled_scale(
+                edit_row, variable, 0, upper, resolution,
+                bg=THEME['bg_card'],
+            )
+            scale.configure(length=110)
+            scale.pack(side=tk.LEFT)
+            scale.bind("<ButtonRelease-1>", self._commit_track_audio_settings)
 
         self._recompute_positions()
+
+    def _load_track_audio_settings(self):
+        if not (0 <= self.tl_sel < len(self._track_rects)):
+            return
+        track = self._track_rects[self.tl_sel]['track']
+        self._updating_track_controls = True
+        try:
+            self.track_volume_var.set(float(track.get('volume', 1.0)))
+            self.track_fade_in_var.set(float(track.get('fade_in', 0.01)))
+            self.track_fade_out_var.set(float(track.get('fade_out', 0.01)))
+            self.track_edit_label.configure(
+                text=f"선택 곡 설정 · {track.get('filename', '')[:28]}"
+            )
+        finally:
+            self._updating_track_controls = False
+
+    def _commit_track_audio_settings(self, _event=None):
+        if self._updating_track_controls:
+            return
+        if not (0 <= self.tl_sel < len(self._track_rects)):
+            return
+        track = self._track_rects[self.tl_sel]['track']
+        duration = max(
+            MIN_TRIM_SECONDS,
+            float(track.get('trim_end', track.get('duration', 0)))
+            - float(track.get('trim_start', 0)),
+        )
+        track['volume'] = max(0.0, min(2.0, self.track_volume_var.get()))
+        track['fade_in'] = max(
+            0.0, min(duration / 2, self.track_fade_in_var.get())
+        )
+        track['fade_out'] = max(
+            0.0, min(duration / 2, self.track_fade_out_var.get())
+        )
+        self.track_fade_in_var.set(track['fade_in'])
+        self.track_fade_out_var.set(track['fade_out'])
+        self.app.persist_video_groups()
 
     def _recompute_positions(self):
         if self.selected_group < 0 or self.selected_group >= len(self.app.video_groups):
@@ -1175,6 +1730,8 @@ class Stage2MusicEdit(tk.Frame):
             rects.append({'idx': i, 'x_start': x_start, 'x_end': x_end, 'track': t})
             x_cursor = x_end
         self._track_rects = rects
+        group = self.app.video_groups[self.selected_group]
+        group['total_duration'] = x_cursor
         self._precompute_waveforms()
 
     def _precompute_waveforms(self):
@@ -1185,18 +1742,56 @@ class Stage2MusicEdit(tk.Frame):
             if not fp or fp in self._waveform_cache:
                 continue
             try:
-                samples, sr = _load_audio_pydub(fp)
+                analysis = r['track'].get('analysis')
+                samples = getattr(analysis, 'waveform', None)
+                sr = getattr(analysis, 'sr', 22050)
+                if samples is None or len(samples) == 0:
+                    if fp not in self._waveform_loading:
+                        self._waveform_loading.add(fp)
+                        threading.Thread(
+                            target=self._load_waveform_async,
+                            args=(fp,), daemon=True,
+                        ).start()
+                    continue
                 if samples is None or len(samples) == 0:
                     continue
-                num_peaks = 500
+                num_peaks = 1200
                 chunk = max(1, len(samples) // num_peaks)
-                peaks = []
-                for i in range(0, len(samples), chunk):
-                    chunk_data = samples[i:i+chunk]
-                    peaks.append((float(np.min(chunk_data)), float(np.max(chunk_data))))
+                usable = len(samples) - (len(samples) % chunk)
+                body = samples[:usable].reshape(-1, chunk)
+                peaks = list(zip(
+                    _np.min(body, axis=1).astype(float),
+                    _np.max(body, axis=1).astype(float),
+                ))
+                if usable < len(samples):
+                    tail = samples[usable:]
+                    peaks.append((float(_np.min(tail)), float(_np.max(tail))))
                 self._waveform_cache[fp] = (peaks, sr, len(samples))
             except Exception:
                 pass
+
+    def _load_waveform_async(self, filepath):
+        try:
+            samples, sr = _load_audio_pydub(filepath)
+            if samples is None or len(samples) == 0:
+                return
+            num_peaks = 1200
+            chunk = max(1, len(samples) // num_peaks)
+            usable = len(samples) - (len(samples) % chunk)
+            body = samples[:usable].reshape(-1, chunk)
+            peaks = list(zip(
+                _np.min(body, axis=1).astype(float),
+                _np.max(body, axis=1).astype(float),
+            ))
+            if usable < len(samples):
+                tail = samples[usable:]
+                peaks.append((float(_np.min(tail)), float(_np.max(tail))))
+            self._waveform_cache[filepath] = (peaks, sr, len(samples))
+            self.after(0, self._draw_timeline)
+        except Exception:
+            pass
+        finally:
+            self._waveform_loading.discard(filepath)
 
     def _draw_timeline(self):
         self.tl_canvas.delete("all")
@@ -1255,19 +1850,32 @@ class Stage2MusicEdit(tk.Frame):
             cached = self._waveform_cache.get(fp)
             if cached and len(cached[0]) > 1:
                 peaks_full, w_sr, w_total = cached
+                analysis = r['track'].get('analysis')
+                source_duration = (
+                    analysis.duration if analysis else w_total / max(w_sr, 1)
+                )
+                trim_start = max(0.0, r['track'].get('trim_start', 0.0))
+                trim_end = r['track'].get('trim_end', source_duration)
+                if trim_end <= 0:
+                    trim_end = source_duration
+                peak_start = int(len(peaks_full) * trim_start / max(source_duration, 0.001))
+                peak_end = int(len(peaks_full) * trim_end / max(source_duration, 0.001))
+                peaks = peaks_full[
+                    max(0, peak_start):min(len(peaks_full), max(peak_start + 1, peak_end))
+                ]
                 wave_w = x2 - x1 - 16
-                if wave_w > 10:
+                if wave_w > 10 and len(peaks) > 1:
                     mid_y = (y1 + y2) / 2
-                    max_abs = max(max(abs(lo), abs(hi)) for lo, hi in peaks_full) or 1.0
+                    max_abs = max(max(abs(lo), abs(hi)) for lo, hi in peaks) or 1.0
                     pts = []
-                    step = wave_w / len(peaks_full)
-                    for pi, (lo, hi) in enumerate(peaks_full):
+                    step = wave_w / len(peaks)
+                    for pi, (lo, hi) in enumerate(peaks):
                         px = x1 + 8 + int(pi * step)
                         norm_hi = hi / max_abs
                         half_h = (y2 - y1 - 12) / 2
                         pts.append((px, int(mid_y - norm_hi * half_h)))
-                    for pi in range(len(peaks_full) - 1, -1, -1):
-                        lo, hi = peaks_full[pi]
+                    for pi in range(len(peaks) - 1, -1, -1):
+                        lo, hi = peaks[pi]
                         px = x1 + 8 + int(pi * step)
                         norm_lo = lo / max_abs
                         half_h = (y2 - y1 - 12) / 2
@@ -1302,8 +1910,43 @@ class Stage2MusicEdit(tk.Frame):
             self.tl_canvas.create_rectangle(x2 - 3, y1 + 4, x2 - 2, y2 - 4,
                                             fill='#ffffff', outline='', tags=("tl_edge", f"tl_{ri}"))
 
+        if self._drop_index is not None and self._track_rects:
+            if self._drop_index >= len(self._track_rects):
+                drop_sec = self._track_rects[-1]['x_end']
+            else:
+                drop_sec = self._track_rects[self._drop_index]['x_start']
+            drop_x = int(drop_sec * pps)
+            self.tl_canvas.create_line(
+                drop_x, lane_top, drop_x, lane_top + self.LANE_H,
+                fill=THEME['warning'], width=4, tags=("drop_marker",)
+            )
+
+        playhead_x = int(self.playhead_sec * pps)
+        self.tl_canvas.create_line(
+            playhead_x, 4, playhead_x, lane_top + self.LANE_H + 4,
+            fill=THEME['danger'], width=2, tags=("playhead",)
+        )
+        self.tl_canvas.create_polygon(
+            playhead_x - 5, 4, playhead_x + 5, 4, playhead_x, 11,
+            fill=THEME['danger'], outline='', tags=("playhead",)
+        )
+
         time_label = f"총 {_fmt_ts(total_dur)} ({int(total_dur)}초)"
-        self.tl_info.configure(text=f"트랙 {len(self._track_rects)}개  |  {time_label}")
+        info = f"트랙 {len(self._track_rects)}개  |  {time_label}"
+        if 0 <= self.tl_sel < len(self._track_rects):
+            selected = self._track_rects[self.tl_sel]['track']
+            analysis = selected.get('analysis')
+            if analysis:
+                start = selected.get('trim_start', 0.0)
+                end = selected.get('trim_end', analysis.duration)
+                if end <= 0:
+                    end = analysis.duration
+                info += (
+                    f"  |  선택: {selected.get('filename', '')}"
+                    f"  {self._fmt_precise(start)} → {self._fmt_precise(end)}"
+                    f"  ({self._fmt_precise(end - start)})"
+                )
+        self.tl_info.configure(text=info)
 
         if self.selected_group >= 0:
             self.tl_canvas.configure(scrollregion=(0, 0, int(total_dur * pps) + 50, ch))
@@ -1321,24 +1964,54 @@ class Stage2MusicEdit(tk.Frame):
             return
         cx = self.tl_canvas.canvasx(event.x)
         cy = self.tl_canvas.canvasy(event.y)
+        lane_top = 36
+        if cy < lane_top or cy > lane_top + self.LANE_H:
+            self.playhead_sec = max(0.0, cx / max(self.tl_px_per_sec, 1))
+            self._draw_timeline()
+            return
         r = self._px_to_track(cx)
         if not r:
             return
         ri = r['idx']
         self.tl_sel = ri
+        self._load_track_audio_settings()
+        self.playhead_sec = max(0.0, cx / max(self.tl_px_per_sec, 1))
         self._draw_timeline()
         pps = self.tl_px_per_sec
         sec = cx / max(pps, 1)
         x1 = r['x_start']
         x2 = r['x_end']
+        analysis = r['track'].get('analysis')
+        source_end = analysis.duration if analysis else r['x_end'] - r['x_start']
+        trim_end = r['track'].get('trim_end', source_end)
+        if trim_end <= 0:
+            trim_end = source_end
         edge_px = max(25 / pps, 0.25)
         if abs(sec - x1) < edge_px:
-            self.tl_drag = {'mode': 'trim_start', 'idx': ri, 'offset_sec': sec - x1}
+            self._push_history()
+            self.tl_drag = {
+                'mode': 'trim_start', 'idx': ri, 'press_x': cx,
+                'initial_start': r['track'].get('trim_start', 0.0),
+                'initial_end': trim_end,
+            }
+            self.tl_canvas.configure(cursor='sb_h_double_arrow')
+            self._capture_timeline_pointer()
         elif abs(sec - x2) < edge_px:
-            self.tl_drag = {'mode': 'trim_end', 'idx': ri, 'offset_sec': sec - x2}
+            self._push_history()
+            self.tl_drag = {
+                'mode': 'trim_end', 'idx': ri, 'press_x': cx,
+                'initial_start': r['track'].get('trim_start', 0.0),
+                'initial_end': trim_end,
+            }
+            self.tl_canvas.configure(cursor='sb_h_double_arrow')
+            self._capture_timeline_pointer()
         else:
-            self.tl_drag = None
-            self._open_trim_modal(ri)
+            self._push_history()
+            self.tl_drag = {
+                'mode': 'reorder_pending', 'idx': ri, 'press_x': cx,
+            }
+            self.tl_canvas.configure(cursor='hand2')
+            self._capture_timeline_pointer()
 
     def _tl_drag_motion(self, event):
         if not self.tl_drag or self.selected_group < 0:
@@ -1354,42 +2027,221 @@ class Stage2MusicEdit(tk.Frame):
             return
         orig_dur = a.duration
         mode = self.tl_drag['mode']
+        delta = (cx - self.tl_drag['press_x']) / max(pps, 1)
+        delta = self._snap_drag_delta(delta, event.state)
 
         if mode == 'trim_start':
-            new_start = max(0, min(sec - self.tl_drag['offset_sec'], t.get('trim_end', orig_dur) - 0.5))
-            old_start = t.get('trim_start', 0)
-            delta = new_start - old_start
+            new_start = max(
+                0.0,
+                min(
+                    self.tl_drag['initial_start'] + delta,
+                    self.tl_drag['initial_end'] - MIN_TRIM_SECONDS,
+                ),
+            )
             t['trim_start'] = new_start
-            for j in range(ri + 1, len(tracks)):
-                tj = tracks[j]
-                tj_old_start = tj.get('trim_start', 0)
-                tj['trim_start'] = max(0, tj_old_start + delta)
-                a_j = tj.get('analysis')
-                if a_j:
-                    if tj.get('trim_end', 0) <= 0:
-                        tj['trim_end'] = a_j.duration
-                    tj['trim_end'] = max(tj['trim_start'] + 0.5, min(tj.get('trim_end', a_j.duration) + delta, a_j.duration))
         elif mode == 'trim_end':
-            old_end = t.get('trim_end', orig_dur)
-            new_end = max(t.get('trim_start', 0) + 0.5, min(sec - self.tl_drag['offset_sec'], orig_dur))
-            delta = new_end - old_end
+            new_end = max(
+                self.tl_drag['initial_start'] + MIN_TRIM_SECONDS,
+                min(self.tl_drag['initial_end'] + delta, orig_dur),
+            )
             t['trim_end'] = new_end
-            for j in range(ri + 1, len(tracks)):
-                tj = tracks[j]
-                tj_old_start = tj.get('trim_start', 0)
-                tj['trim_start'] = max(0, tj_old_start + delta)
-                a_j = tj.get('analysis')
-                if a_j:
-                    if tj.get('trim_end', 0) <= 0:
-                        tj['trim_end'] = a_j.duration
-                    tj['trim_end'] = max(tj['trim_start'] + 0.5, min(tj.get('trim_end', a_j.duration) + delta, a_j.duration))
+        elif mode in ('reorder_pending', 'reorder'):
+            if mode == 'reorder_pending' and abs(cx - self.tl_drag['press_x']) < 6:
+                return
+            self.tl_drag['mode'] = 'reorder'
+            self.tl_canvas.configure(cursor='fleur')
+            self._drop_index = self._reorder_drop_index(cx)
 
         self._recompute_positions()
         self._draw_timeline()
+        if mode in ('trim_start', 'trim_end'):
+            start = t.get('trim_start', 0.0)
+            end = t.get('trim_end', orig_dur)
+            self.tl_info.configure(
+                text=(
+                    f"트림 중  |  시작 {self._fmt_precise(start)}"
+                    f"  →  종료 {self._fmt_precise(end)}"
+                    f"  |  길이 {self._fmt_precise(end - start)}"
+                )
+            )
 
     def _tl_release(self, event):
+        mode = self.tl_drag.get('mode') if self.tl_drag else None
+        changed = mode in ('trim_start', 'trim_end', 'reorder')
+        if mode == 'reorder':
+            tracks = self.app.video_groups[self.selected_group].get('tracks', [])
+            old_index = self.tl_drag['idx']
+            new_index = self._drop_index
+            if new_index is not None and 0 <= old_index < len(tracks):
+                item = tracks.pop(old_index)
+                if new_index > old_index:
+                    new_index -= 1
+                new_index = max(0, min(new_index, len(tracks)))
+                tracks.insert(new_index, item)
+                self.tl_sel = new_index
+        self._cancel_tl_drag(redraw=False)
+        self._recompute_positions()
+        self._draw_timeline()
+        if changed:
+            self.app.persist_video_groups()
+
+    def _capture_timeline_pointer(self):
+        try:
+            self.tl_canvas.focus_set()
+            self.tl_canvas.grab_set()
+        except tk.TclError:
+            self._cancel_tl_drag(redraw=False)
+
+    def _cancel_tl_drag(self, redraw=True):
+        self._drop_index = None
         self.tl_drag = None
-        self.tl_canvas.configure(cursor='')
+        try:
+            if self.tl_canvas.grab_current() == self.tl_canvas:
+                self.tl_canvas.grab_release()
+            self.tl_canvas.configure(cursor='')
+        except tk.TclError:
+            pass
+        if redraw and self.winfo_exists():
+            self._recompute_positions()
+            self._draw_timeline()
+
+    @staticmethod
+    def _fmt_precise(seconds):
+        seconds = max(0.0, float(seconds))
+        minutes = int(seconds // 60)
+        remainder = seconds - minutes * 60
+        return f"{minutes:02d}:{remainder:06.3f}"
+
+    @staticmethod
+    def _snap_drag_delta(delta, event_state):
+        alt_pressed = bool(event_state & (0x0008 | 0x20000))
+        shift_pressed = bool(event_state & 0x0001)
+        snap = 0.001 if alt_pressed else (0.01 if shift_pressed else 0.1)
+        return round(delta / snap) * snap
+
+    def _snapshot(self):
+        if self.selected_group < 0:
+            return []
+        tracks = self.app.video_groups[self.selected_group].get('tracks', [])
+        return [
+            {
+                'track': track,
+                'trim_start': track.get('trim_start', 0.0),
+                'trim_end': track.get('trim_end', 0.0),
+            }
+            for track in tracks
+        ]
+
+    def _push_history(self):
+        snapshot = self._snapshot()
+        if not snapshot:
+            return
+        self._history = self._history[:self._history_index + 1]
+        self._history.append(snapshot)
+        self._history = self._history[-100:]
+        self._history_index = len(self._history) - 1
+
+    def _restore_snapshot(self, snapshot):
+        tracks = []
+        for state in snapshot:
+            track = state['track']
+            track['trim_start'] = state['trim_start']
+            track['trim_end'] = state['trim_end']
+            tracks.append(track)
+        self.app.video_groups[self.selected_group]['tracks'] = tracks
+        self.tl_sel = min(self.tl_sel, len(tracks) - 1)
+        self._recompute_positions()
+        self._draw_timeline()
+        self.app.persist_video_groups()
+
+    def _undo(self):
+        if self._history_index < 0:
+            return
+        current = self._snapshot()
+        snapshot = self._history[self._history_index]
+        if self._history_index == len(self._history) - 1:
+            self._history.append(current)
+        self._restore_snapshot(snapshot)
+        self._history_index -= 1
+
+    def _redo(self):
+        target = self._history_index + 2
+        if target >= len(self._history):
+            return
+        self._restore_snapshot(self._history[target])
+        self._history_index += 1
+
+    def _play_selection(self):
+        if not (0 <= self.tl_sel < len(self._track_rects)):
+            messagebox.showinfo("미리듣기", "먼저 트랙을 선택하세요.")
+            return
+        track = self._track_rects[self.tl_sel]['track']
+        analysis = track.get('analysis')
+        if not analysis:
+            return
+        if self._preview_player is None:
+            from audio_preview import AudioPreviewPlayer
+            self._preview_player = AudioPreviewPlayer(video_gen._find_ffmpeg_exe)
+        start = track.get('trim_start', 0.0)
+        end = track.get('trim_end', analysis.duration)
+        if end <= 0:
+            end = analysis.duration
+        timeline_start = self._track_rects[self.tl_sel]['x_start']
+        self.tl_info.configure(text="미리듣기 준비 중...")
+        self._preview_player.play(
+            track.get('filepath', ''), start, end - start,
+            volume=float(track.get('volume', 1.0)),
+            fade_in=float(track.get('fade_in', 0.01)),
+            fade_out=float(track.get('fade_out', 0.01)),
+            on_ready=lambda: self.after(
+                0, lambda: self._start_preview_playhead(
+                    end - start, timeline_start
+                )
+            ),
+            on_error=lambda error: self.after(
+                0, lambda: messagebox.showerror("미리듣기 오류", str(error))
+            ),
+        )
+
+    def _stop_preview(self):
+        if self._preview_player:
+            self._preview_player.stop()
+        if self._audio_preview_after_id:
+            self.after_cancel(self._audio_preview_after_id)
+            self._audio_preview_after_id = None
+
+    def _start_preview_playhead(self, duration, timeline_start):
+        self._audio_preview_started = time.monotonic()
+        self._audio_preview_duration = duration
+        self._audio_preview_timeline_start = timeline_start
+        self._tick_preview_playhead()
+
+    def _tick_preview_playhead(self):
+        elapsed = time.monotonic() - self._audio_preview_started
+        self.playhead_sec = self._audio_preview_timeline_start + min(
+            elapsed, self._audio_preview_duration
+        )
+        self._draw_timeline()
+        if elapsed < self._audio_preview_duration:
+            self._audio_preview_after_id = self.after(
+                33, self._tick_preview_playhead
+            )
+        else:
+            self._audio_preview_after_id = None
+
+    def _reorder_drop_index(self, canvas_x):
+        sec = canvas_x / max(self.tl_px_per_sec, 1)
+        for i, rect in enumerate(self._track_rects):
+            midpoint = (rect['x_start'] + rect['x_end']) / 2
+            if sec < midpoint:
+                return i
+        return len(self._track_rects)
+
+    def _tl_double_click(self, event):
+        cx = self.tl_canvas.canvasx(event.x)
+        r = self._px_to_track(cx)
+        if r:
+            self._open_trim_modal(r['idx'])
 
     def _tl_hover(self, event):
         if self.tl_drag or self.selected_group < 0:
@@ -1397,7 +2249,7 @@ class Stage2MusicEdit(tk.Frame):
         cx = self.tl_canvas.canvasx(event.x)
         r = self._px_to_track(cx)
         if not r:
-            self.tl_canvas.configure(cursor='')
+            self.tl_canvas.configure(cursor='crosshair')
             return
         pps = self.tl_px_per_sec
         sec = cx / max(pps, 1)
@@ -1407,7 +2259,7 @@ class Stage2MusicEdit(tk.Frame):
         if abs(sec - x1) < edge_px or abs(sec - x2) < edge_px:
             self.tl_canvas.configure(cursor='sb_h_double_arrow')
         else:
-            self.tl_canvas.configure(cursor='')
+            self.tl_canvas.configure(cursor='hand2')
 
     def _tl_scroll(self, event):
         if event.state & 0x4:
@@ -1510,23 +2362,14 @@ class Stage2MusicEdit(tk.Frame):
 
         def apply_trim():
             try:
+                self._push_history()
                 new_start = max(0, min(self._hms_to_sec(start_ent.get()), a.duration))
                 new_end = max(new_start + 0.5, min(self._hms_to_sec(end_ent.get()), a.duration))
-                old_start = t.get('trim_start', 0)
-                delta = new_start - old_start
                 t['trim_start'] = new_start
                 t['trim_end'] = new_end
-                for j in range(idx + 1, len(tracks)):
-                    tj = tracks[j]
-                    tj['trim_start'] = max(0, tj.get('trim_start', 0) + delta)
-                    a_j = tj.get('analysis')
-                    if a_j:
-                        if tj.get('trim_end', 0) <= 0:
-                            tj['trim_end'] = a_j.duration
-                        tj['trim_end'] = max(tj['trim_start'] + 0.5,
-                                             min(tj.get('trim_end', a_j.duration) + delta, a_j.duration))
                 self._recompute_positions()
                 self._draw_timeline()
+                self.app.persist_video_groups()
                 win.destroy()
             except Exception:
                 pass
@@ -1539,6 +2382,7 @@ class Stage2MusicEdit(tk.Frame):
     def _reset_all(self):
         if self.selected_group < 0:
             return
+        self._push_history()
         tracks = self.app.video_groups[self.selected_group].get('tracks', [])
         for t in tracks:
             a = t.get('analysis')
@@ -1547,16 +2391,19 @@ class Stage2MusicEdit(tk.Frame):
                 t['trim_end'] = a.duration
         self._recompute_positions()
         self._draw_timeline()
+        self.app.persist_video_groups()
 
     def _move_up(self):
         if self.tl_sel <= 0 or self.selected_group < 0:
             return
+        self._push_history()
         tracks = self.app.video_groups[self.selected_group].get('tracks', [])
         i = self.tl_sel
         tracks[i], tracks[i - 1] = tracks[i - 1], tracks[i]
         self.tl_sel = i - 1
         self._recompute_positions()
         self._draw_timeline()
+        self.app.persist_video_groups()
 
     def _move_down(self):
         if self.selected_group < 0:
@@ -1565,10 +2412,12 @@ class Stage2MusicEdit(tk.Frame):
         i = self.tl_sel
         if i < 0 or i >= len(tracks) - 1:
             return
+        self._push_history()
         tracks[i], tracks[i + 1] = tracks[i + 1], tracks[i]
         self.tl_sel = i + 1
         self._recompute_positions()
         self._draw_timeline()
+        self.app.persist_video_groups()
 
     def refresh(self):
         if not self.app.video_groups:
@@ -1584,11 +2433,32 @@ class Stage2MusicEdit(tk.Frame):
         self._set_group(idx)
 
     def _set_group(self, idx):
+        self._cancel_tl_drag(redraw=False)
         self.selected_group = idx
         populate_group_tabs(self.tabs_container, self.app.video_groups, idx, self._set_group)
         self.tl_sel = -1
         self._recompute_positions()
-        self.after(50, self._zoom_fit)
+        if self._zoom_after_id:
+            try:
+                self.after_cancel(self._zoom_after_id)
+            except tk.TclError:
+                pass
+        self._zoom_after_id = self.after(50, self._run_zoom_fit)
+
+    def _run_zoom_fit(self):
+        self._zoom_after_id = None
+        if self.winfo_exists():
+            self._zoom_fit()
+
+    def on_hide(self):
+        self._cancel_tl_drag(redraw=False)
+        self._stop_preview()
+        if self._zoom_after_id:
+            try:
+                self.after_cancel(self._zoom_after_id)
+            except tk.TclError:
+                pass
+            self._zoom_after_id = None
 
 
 # ─── Stage 3: 클립 목록 (이미지/영상) ───
@@ -1837,7 +2707,30 @@ class Stage3VideoEdit(tk.Frame):
         self.viz_bars = tk.IntVar(value=64)
         self.viz_height = tk.IntVar(value=120)
         self.viz_smooth = tk.DoubleVar(value=0.3)
+        self.viz_bar_width = tk.IntVar(value=0)
+        self.viz_bar_gap = tk.IntVar(value=2)
+        self.viz_min_height = tk.IntVar(value=1)
+        self.viz_sensitivity = tk.DoubleVar(value=1.0)
+        self.viz_opacity = tk.DoubleVar(value=0.85)
+        self.viz_corner_radius = tk.IntVar(value=2)
+        self.viz_decay = tk.DoubleVar(value=0.82)
+        self.viz_mirror = tk.BooleanVar(value=False)
+        self.viz_invert = tk.BooleanVar(value=False)
+        self.viz_gradient = tk.BooleanVar(value=True)
+        self.viz_glow = tk.IntVar(value=0)
+        self.viz_line_width = tk.IntVar(value=2)
         self.bg_image = tk.StringVar(value="")
+        self.bg_fit_var = tk.StringVar(value="cover")
+        self.album_image_var = tk.StringVar(value="")
+        self.album_x_var = tk.IntVar(value=80)
+        self.album_y_var = tk.IntVar(value=80)
+        self.album_width_var = tk.IntVar(value=360)
+        self.album_opacity_var = tk.DoubleVar(value=1.0)
+        self.logo_image_var = tk.StringVar(value="")
+        self.logo_x_var = tk.IntVar(value=1660)
+        self.logo_y_var = tk.IntVar(value=60)
+        self.logo_width_var = tk.IntVar(value=180)
+        self.logo_opacity_var = tk.DoubleVar(value=1.0)
         self.fade_in = tk.DoubleVar(value=2.0)
         self.fade_out = tk.DoubleVar(value=3.0)
         self.show_title = tk.BooleanVar(value=True)
@@ -1846,6 +2739,15 @@ class Stage3VideoEdit(tk.Frame):
         self.show_camelot = tk.BooleanVar(value=False)
         self.show_time = tk.BooleanVar(value=True)
         self.show_progress = tk.BooleanVar(value=True)
+        self.text_font_size_var = tk.IntVar(value=42)
+        self.text_sub_font_size_var = tk.IntVar(value=28)
+        self.text_color_var = tk.StringVar(value="#ffffff")
+        self.text_align_var = tk.StringVar(value="center")
+        self.text_x_var = tk.DoubleVar(value=0.5)
+        self.text_y_var = tk.DoubleVar(value=0.5)
+        self.text_bold_var = tk.BooleanVar(value=False)
+        self.text_italic_var = tk.BooleanVar(value=False)
+        self.text_underline_var = tk.BooleanVar(value=False)
         self.fx_bounce = tk.BooleanVar(value=False)
         self.fx_shake = tk.BooleanVar(value=False)
         self.fx_zoom = tk.BooleanVar(value=False)
@@ -1863,7 +2765,27 @@ class Stage3VideoEdit(tk.Frame):
         self.fx_crt_noise = tk.DoubleVar(value=0.0)
         self.fx_crt_flicker = tk.DoubleVar(value=0.0)
         self.resolution = tk.StringVar(value="1080p")
+        self.custom_width_var = tk.StringVar(value="1920")
+        self.custom_height_var = tk.StringVar(value="1080")
         self.fps_var = tk.StringVar(value="24")
+        self.video_codec_var = tk.StringVar(value="자동")
+        self.audio_codec_var = tk.StringVar(value="aac")
+        self.video_bitrate_var = tk.StringVar(value="5000k")
+        self.audio_bitrate_var = tk.StringVar(value="192k")
+        self.loop_video_var = tk.BooleanVar(value=False)
+        self.loop_mode_var = tk.StringVar(value="반복 횟수")
+        self.loop_count_var = tk.StringVar(value="1")
+        self.loop_target_h_var = tk.StringVar(value="1")
+        self.loop_target_m_var = tk.StringVar(value="0")
+        self.loop_target_s_var = tk.StringVar(value="0")
+        self.normalize_loudness_var = tk.BooleanVar(value=True)
+        self.target_lufs_var = tk.StringVar(value="-14")
+        self._render_cancel_event = threading.Event()
+        self._render_job = None
+        self._last_render_dir = None
+        self._preview_render_lock = threading.Lock()
+        self._preview_frame_worker_active = False
+        self._preview_requested_t = None
 
         def sec(t):
             styled_label(sf, t, size=11, bold=True, bg=THEME['bg_card']).pack(fill=tk.X, pady=(12, 3), padx=12, anchor=tk.W)
@@ -1895,14 +2817,66 @@ class Stage3VideoEdit(tk.Frame):
         styled_entry(bf, textvariable=self.bg_image, width=20).pack(side=tk.LEFT, fill=tk.X, expand=True)
         styled_button(bf, "찾기", lambda: self._pick_bg(), padx=6).pack(side=tk.RIGHT, padx=(4, 0))
         styled_label(sf, " 없으면 키 기반 그라디언트", size=8, color=THEME['fg_dimmer'], bg=THEME['bg_card']).pack(anchor=tk.W, padx=12)
+        opt("맞춤:", self.bg_fit_var, ["cover", "contain"])
+
+        def overlay_controls(title, path_var, x_var, y_var, width_var, opacity_var):
+            sep()
+            sec(title)
+            row = tk.Frame(sf, bg=THEME['bg_card'])
+            row.pack(fill=tk.X, padx=12, pady=2)
+            styled_entry(
+                row, textvariable=path_var, width=18
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+            styled_button(
+                row, "찾기", lambda: self._pick_overlay(path_var), padx=6
+            ).pack(side=tk.RIGHT, padx=(4, 0))
+            sld("X:", x_var, 0, 3840, 1)
+            sld("Y:", y_var, 0, 2160, 1)
+            sld("너비:", width_var, 16, 1920, 1)
+            sld("투명도:", opacity_var, 0, 1, 0.05)
+
+        overlay_controls(
+            "앨범 이미지", self.album_image_var,
+            self.album_x_var, self.album_y_var,
+            self.album_width_var, self.album_opacity_var,
+        )
+        overlay_controls(
+            "로고", self.logo_image_var,
+            self.logo_x_var, self.logo_y_var,
+            self.logo_width_var, self.logo_opacity_var,
+        )
 
         sep()
         sec("비주얼라이저")
-        opt("타입:", self.viz_type, ["eq_bars", "waveform", "spectrum", "circles", "radial", "none"])
-        opt("위치:", self.viz_pos, ["top", "bottom"])
+        self.viz_type.set("기본 막대형")
+        opt("타입:", self.viz_type, [
+            "기본 막대형", "미니멀 라인형", "스펙트럼형",
+            "원형", "중앙 방사형", "사용 안 함",
+        ])
+        opt("위치:", self.viz_pos, ["top", "center", "bottom"])
         sld("바 개수:", self.viz_bars, 8, 256, 8)
         sld("높이:", self.viz_height, 40, 300, 10)
         sld("스무딩:", self.viz_smooth, 0, 0.95, 0.05)
+        sld("감쇠:", self.viz_decay, 0, 0.99, 0.01)
+        sld("막대 너비:", self.viz_bar_width, 0, 30, 1)
+        sld("막대 간격:", self.viz_bar_gap, 0, 16, 1)
+        sld("최소 높이:", self.viz_min_height, 0, 30, 1)
+        sld("감도:", self.viz_sensitivity, 0.1, 3.0, 0.1)
+        sld("투명도:", self.viz_opacity, 0.1, 1.0, 0.05)
+        sld("라운드:", self.viz_corner_radius, 0, 16, 1)
+        sld("글로우:", self.viz_glow, 0, 20, 1)
+        sld("선 굵기:", self.viz_line_width, 1, 12, 1)
+        chk("좌우 대칭", self.viz_mirror)
+        chk("방향 반전", self.viz_invert)
+        chk("그라디언트", self.viz_gradient)
+        viz_color_row = tk.Frame(sf, bg=THEME['bg_card'])
+        viz_color_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(
+            viz_color_row, "색상:", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        styled_entry(
+            viz_color_row, textvariable=self.viz_color, width=10
+        ).pack(side=tk.LEFT, padx=4)
 
         self.viz_x_var = tk.DoubleVar(value=0)
         self.viz_y_var = tk.DoubleVar(value=0)
@@ -1910,17 +2884,17 @@ class Stage3VideoEdit(tk.Frame):
         sv1 = tk.Frame(sf, bg=THEME['bg_card'])
         sv1.pack(fill=tk.X, padx=12, pady=2)
         styled_label(sv1, "X 오프셋:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(sv1, self.viz_x_var, 0, 960, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        styled_scale(sv1, self.viz_x_var, 0, 3840, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
         sv2 = tk.Frame(sf, bg=THEME['bg_card'])
         sv2.pack(fill=tk.X, padx=12, pady=2)
         styled_label(sv2, "Y 오프셋:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(sv2, self.viz_y_var, 0, 540, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        styled_scale(sv2, self.viz_y_var, 0, 2160, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
         sv3 = tk.Frame(sf, bg=THEME['bg_card'])
         sv3.pack(fill=tk.X, padx=12, pady=2)
         styled_label(sv3, "너비:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(sv3, self.viz_w_var, 0, 1920, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+        styled_scale(sv3, self.viz_w_var, 0, 3840, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
 
         sep()
         sec("페이드")
@@ -1935,38 +2909,31 @@ class Stage3VideoEdit(tk.Frame):
         chk("캠롯", self.show_camelot)
         chk("타이머", self.show_time)
         chk("프로그레스 바", self.show_progress)
+        sld("제목 크기:", self.text_font_size_var, 12, 160, 1)
+        sld("정보 크기:", self.text_sub_font_size_var, 10, 100, 1)
+        opt("정렬:", self.text_align_var, ["left", "center", "right"])
+        chk("일반 텍스트 굵게", self.text_bold_var)
+        chk("일반 텍스트 기울임", self.text_italic_var)
+        chk("일반 텍스트 밑줄", self.text_underline_var)
+        sld("텍스트 X:", self.text_x_var, 0, 1, 0.01)
+        sld("텍스트 Y:", self.text_y_var, 0, 1, 0.01)
+        text_color_row = tk.Frame(sf, bg=THEME['bg_card'])
+        text_color_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(
+            text_color_row, "색상:", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        styled_entry(
+            text_color_row, textvariable=self.text_color_var, width=10
+        ).pack(side=tk.LEFT, padx=4)
 
         self.text_font_family_var = tk.StringVar(value=FONT_FAMILY)
         tf_font = tk.Frame(sf, bg=THEME['bg_card'])
         tf_font.pack(fill=tk.X, padx=12, pady=(6, 2))
         styled_label(tf_font, "일반 폰트:", size=10, bg=THEME['bg_card']).pack(anchor=tk.W)
-        try:
-            _avail_fonts = sorted(set(tkfont.families()))
-        except Exception:
-            _avail_fonts = [FONT_FAMILY]
-        fl_frame = tk.Frame(tf_font, bg=THEME['bg_card'], highlightthickness=1,
-                            highlightbackground=THEME['border'])
-        fl_frame.pack(fill=tk.X)
-        fl_listbox = tk.Listbox(fl_frame, height=5, exportselection=False,
-                                bg=THEME['bg_input'], fg=THEME['fg'],
-                                selectbackground=THEME['accent'], selectforeground="#ffffff",
-                                font=_font(9), relief=tk.FLAT, activestyle="none",
-                                highlightthickness=0)
-        fl_scroll = ttk.Scrollbar(fl_frame, orient=tk.VERTICAL, command=fl_listbox.yview)
-        fl_listbox.configure(yscrollcommand=fl_scroll.set)
-        for f_name in _avail_fonts:
-            fl_listbox.insert(tk.END, f_name)
-        if FONT_FAMILY in _avail_fonts:
-            fl_listbox.selection_set(_avail_fonts.index(FONT_FAMILY))
-            fl_listbox.see(_avail_fonts.index(FONT_FAMILY))
-        fl_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        fl_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        def _on_text_font_select(event):
-            sel = fl_listbox.curselection()
-            if sel:
-                self.text_font_family_var.set(_avail_fonts[sel[0]])
-        fl_listbox.bind("<<ListboxSelect>>", _on_text_font_select)
+        from font_combo import SearchableFontComboBox
+        SearchableFontComboBox(
+            tf_font, self.text_font_family_var, THEME, _font(9)
+        ).pack(fill=tk.X)
 
         sep()
         sec("커스텀 텍스트")
@@ -2013,29 +2980,9 @@ class Stage3VideoEdit(tk.Frame):
         cf_font = tk.Frame(sf, bg=THEME['bg_card'])
         cf_font.pack(fill=tk.X, padx=12, pady=2)
         styled_label(cf_font, "커스텀 폰트:", size=10, bg=THEME['bg_card']).pack(anchor=tk.W)
-        cfl_frame = tk.Frame(cf_font, bg=THEME['bg_card'], highlightthickness=1,
-                             highlightbackground=THEME['border'])
-        cfl_frame.pack(fill=tk.X)
-        cfl_listbox = tk.Listbox(cfl_frame, height=5, exportselection=False,
-                                 bg=THEME['bg_input'], fg=THEME['fg'],
-                                 selectbackground=THEME['accent'], selectforeground="#ffffff",
-                                 font=_font(9), relief=tk.FLAT, activestyle="none",
-                                 highlightthickness=0)
-        cfl_scroll = ttk.Scrollbar(cfl_frame, orient=tk.VERTICAL, command=cfl_listbox.yview)
-        cfl_listbox.configure(yscrollcommand=cfl_scroll.set)
-        for f_name in _avail_fonts:
-            cfl_listbox.insert(tk.END, f_name)
-        if FONT_FAMILY in _avail_fonts:
-            cfl_listbox.selection_set(_avail_fonts.index(FONT_FAMILY))
-            cfl_listbox.see(_avail_fonts.index(FONT_FAMILY))
-        cfl_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        cfl_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        def _on_custom_font_select(event):
-            sel = cfl_listbox.curselection()
-            if sel:
-                self.custom_font_family_var.set(_avail_fonts[sel[0]])
-        cfl_listbox.bind("<<ListboxSelect>>", _on_custom_font_select)
+        SearchableFontComboBox(
+            cf_font, self.custom_font_family_var, THEME, _font(9)
+        ).pack(fill=tk.X)
 
         self.custom_affects_fx_var = tk.BooleanVar(value=True)
         cf7 = tk.Frame(sf, bg=THEME['bg_card'])
@@ -2067,8 +3014,112 @@ class Stage3VideoEdit(tk.Frame):
 
         sep()
         sec("해상도")
-        opt("", self.resolution, ["720p", "1080p", "4k"])
+        opt("", self.resolution, [
+            "720p", "1080p", "4k", "세로 1080x1920",
+            "정사각 1080x1080", "사용자 지정",
+        ])
+        custom_res_row = tk.Frame(sf, bg=THEME['bg_card'])
+        custom_res_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(
+            custom_res_row, "사용자 지정:", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        styled_entry(
+            custom_res_row, textvariable=self.custom_width_var, width=6
+        ).pack(side=tk.LEFT, padx=(6, 2))
+        styled_label(
+            custom_res_row, "×", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        styled_entry(
+            custom_res_row, textvariable=self.custom_height_var, width=6
+        ).pack(side=tk.LEFT, padx=2)
         opt("FPS:", self.fps_var, ["8", "12", "24", "30"])
+        opt("영상 코덱:", self.video_codec_var, [
+            "자동", "CPU (libx264)", "NVIDIA (h264_nvenc)",
+            "Intel (h264_qsv)", "AMD (h264_amf)",
+        ])
+        opt("오디오 코덱:", self.audio_codec_var, ["aac", "libmp3lame"])
+        bitrate_row = tk.Frame(sf, bg=THEME['bg_card'])
+        bitrate_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(
+            bitrate_row, "비트레이트:", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        styled_entry(
+            bitrate_row, textvariable=self.video_bitrate_var, width=8
+        ).pack(side=tk.LEFT, padx=(6, 2))
+        styled_label(
+            bitrate_row, "영상", size=9, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        styled_entry(
+            bitrate_row, textvariable=self.audio_bitrate_var, width=8
+        ).pack(side=tk.LEFT, padx=(8, 2))
+        styled_label(
+            bitrate_row, "오디오", size=9, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+
+        sep()
+        sec("완성 영상 반복")
+        chk("완성된 Mix 전체를 반복", self.loop_video_var)
+        opt("반복 방식:", self.loop_mode_var, ["반복 횟수", "목표 재생시간"])
+        loop_count_row = tk.Frame(sf, bg=THEME['bg_card'])
+        loop_count_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(
+            loop_count_row, "반복 횟수:", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        self.loop_count_entry = styled_entry(
+            loop_count_row, textvariable=self.loop_count_var, width=7
+        )
+        self.loop_count_entry.pack(side=tk.LEFT, padx=(6, 4))
+        styled_label(
+            loop_count_row, "회", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+
+        loop_target_row = tk.Frame(sf, bg=THEME['bg_card'])
+        loop_target_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(
+            loop_target_row, "목표시간:", size=10, bg=THEME['bg_card']
+        ).pack(side=tk.LEFT)
+        self.loop_target_entries = []
+        for variable, unit in (
+            (self.loop_target_h_var, "시간"),
+            (self.loop_target_m_var, "분"),
+            (self.loop_target_s_var, "초"),
+        ):
+            entry = styled_entry(
+                loop_target_row, textvariable=variable, width=4
+            )
+            entry.pack(side=tk.LEFT, padx=(5, 2))
+            self.loop_target_entries.append(entry)
+            styled_label(
+                loop_target_row, unit, size=9, bg=THEME['bg_card']
+            ).pack(side=tk.LEFT)
+
+        self.loop_summary_label = styled_label(
+            sf, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card']
+        )
+        self.loop_summary_label.pack(fill=tk.X, anchor=tk.W, padx=12, pady=(4, 2))
+        styled_label(
+            sf,
+            "목표시간 방식도 마지막 반복을 자르지 않고 전체 재생합니다.",
+            size=8, color=THEME['fg_dimmer'], bg=THEME['bg_card'],
+        ).pack(anchor=tk.W, padx=12, pady=(0, 4))
+        for variable in (
+            self.loop_video_var, self.loop_mode_var, self.loop_count_var,
+            self.loop_target_h_var, self.loop_target_m_var,
+            self.loop_target_s_var,
+        ):
+            variable.trace_add("write", lambda *_: self._update_repeat_summary())
+
+        sep()
+        sec("오디오 마스터링")
+        chk("스트리밍 믹싱 후 음량 정규화", self.normalize_loudness_var)
+        loudness_row = tk.Frame(sf, bg=THEME['bg_card'])
+        loudness_row.pack(fill=tk.X, padx=12, pady=2)
+        styled_label(loudness_row, "목표 LUFS:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_entry(loudness_row, textvariable=self.target_lufs_var, width=7).pack(side=tk.LEFT, padx=6)
+        styled_label(
+            sf, "YouTube 권장 기본값: -14 LUFS / true peak -1.5 dBTP",
+            size=8, color=THEME['fg_dimmer'], bg=THEME['bg_card'],
+        ).pack(anchor=tk.W, padx=12, pady=(0, 4))
 
         right = tk.Frame(main, bg=THEME['bg_card'])
         main.add(right, minsize=400)
@@ -2086,7 +3137,7 @@ class Stage3VideoEdit(tk.Frame):
         self.preview_play_btn = styled_button(prev_ctrl, "▶ 실시간 재생", self._preview_render_video, "primary", padx=6)
         self.preview_play_btn.pack(side=tk.RIGHT, padx=2)
         styled_button(prev_ctrl, "새로고침", self._refresh_canvas_preview, padx=6).pack(side=tk.RIGHT, padx=2)
-        self._preview_status_label = styled_label(prev_ctrl, "설정 변경 후 새로고침", size=9, color=THEME['fg_dim'], bg=THEME['bg_card'])
+        self._preview_status_label = styled_label(prev_ctrl, "설정 변경 시 자동 반영", size=9, color=THEME['fg_dim'], bg=THEME['bg_card'])
         self._preview_status_label.pack(side=tk.LEFT)
 
         scrub_frame = tk.Frame(right, bg=THEME['bg_card'])
@@ -2101,6 +3152,8 @@ class Stage3VideoEdit(tk.Frame):
         self._scrub_playing = False
         self._scrub_after_id = None
         self._programmatic_scrub = False
+        self._preview_settings_after_id = None
+        self._preview_generation = 0
 
         sep_r = tk.Frame(right, bg=THEME['separator'], height=1)
         sep_r.pack(fill=tk.X, padx=12, pady=6)
@@ -2113,6 +3166,16 @@ class Stage3VideoEdit(tk.Frame):
 
         self.render_btn = styled_button(right, "전체 렌더링 시작", self._start_render, "primary", padx=10, pady=8)
         self.render_btn.pack(fill=tk.X, padx=12, pady=(0, 6))
+        self.cancel_render_btn = styled_button(
+            right, "렌더링 취소", self._cancel_render, "danger", padx=10, pady=6
+        )
+        self.cancel_render_btn.pack(fill=tk.X, padx=12, pady=(0, 6))
+        self.cancel_render_btn.configure(state=tk.DISABLED)
+        self.retry_render_btn = styled_button(
+            right, "미완료 Mix 재시도", self._retry_render, padx=10, pady=6
+        )
+        self.retry_render_btn.pack(fill=tk.X, padx=12, pady=(0, 6))
+        self.retry_render_btn.configure(state=tk.DISABLED)
         self.render_status = styled_label(right, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card'])
         self.render_status.pack(padx=12, anchor=tk.W)
         self.render_progress_frame = tk.Frame(right, bg=THEME['bg_card'])
@@ -2136,6 +3199,116 @@ class Stage3VideoEdit(tk.Frame):
                 _bind_wheel_recursive(child)
 
         _bind_wheel_recursive(sf)
+        preview_variables = [
+            value for name, value in vars(self).items()
+            if isinstance(value, tk.Variable)
+            and name not in {
+                'scrub_var', 'loop_video_var', 'loop_mode_var',
+                'loop_count_var', 'loop_target_h_var', 'loop_target_m_var',
+                'loop_target_s_var', 'normalize_loudness_var',
+                'target_lufs_var', 'fps_var', 'video_codec_var',
+                'audio_codec_var', 'video_bitrate_var',
+                'audio_bitrate_var',
+            }
+        ]
+        for variable in preview_variables:
+            variable.trace_add(
+                "write", lambda *_: self._schedule_preview_refresh()
+            )
+
+    def _schedule_preview_refresh(self):
+        if self._preview_settings_after_id:
+            try:
+                self.after_cancel(self._preview_settings_after_id)
+            except tk.TclError:
+                pass
+        self._preview_settings_after_id = self.after(
+            180, self._apply_scheduled_preview_refresh
+        )
+
+    def _apply_scheduled_preview_refresh(self):
+        self._preview_settings_after_id = None
+        if (
+            self.winfo_exists() and self.winfo_ismapped()
+            and self.app.current_stage == 4
+        ):
+            self._refresh_canvas_preview()
+
+    def on_hide(self):
+        self._preview_generation += 1
+        self._preview_requested_t = None
+        self._stop_scrub_play()
+        if self._preview_settings_after_id:
+            try:
+                self.after_cancel(self._preview_settings_after_id)
+            except tk.TclError:
+                pass
+            self._preview_settings_after_id = None
+
+    def _get_repeat_plan(self, base_duration=None):
+        from repeat_settings import (
+            MODE_COUNT, MODE_TARGET, build_repeat_plan, hms_to_seconds,
+            estimate_group_duration,
+        )
+        if base_duration is None:
+            if 0 <= self.selected_group < len(self.app.video_groups):
+                base_duration = estimate_group_duration(
+                    self.app.video_groups[self.selected_group]
+                )
+            else:
+                base_duration = 0
+        mode = (
+            MODE_TARGET
+            if self.loop_mode_var.get() == "목표 재생시간"
+            else MODE_COUNT
+        )
+        count = int(self.loop_count_var.get() or "1")
+        target = hms_to_seconds(
+            self.loop_target_h_var.get() or "0",
+            self.loop_target_m_var.get() or "0",
+            self.loop_target_s_var.get() or "0",
+        )
+        return build_repeat_plan(
+            base_duration,
+            enabled=self.loop_video_var.get(),
+            mode=mode,
+            repeat_count=count,
+            target_seconds=target,
+        )
+
+    def _update_repeat_summary(self):
+        if not hasattr(self, "loop_summary_label"):
+            return
+        target_mode = self.loop_mode_var.get() == "목표 재생시간"
+        self.loop_count_entry.configure(
+            state=tk.DISABLED if target_mode else tk.NORMAL
+        )
+        for entry in self.loop_target_entries:
+            entry.configure(state=tk.NORMAL if target_mode else tk.DISABLED)
+        try:
+            plan = self._get_repeat_plan()
+            from repeat_settings import format_duration
+            if not self.loop_video_var.get():
+                text = (
+                    f"플레이리스트 1회 길이: "
+                    f"{format_duration(plan.base_seconds)} · 반복 사용 안 함"
+                )
+            elif target_mode:
+                text = (
+                    f"1회 길이 {format_duration(plan.base_seconds)} · "
+                    f"예상 {plan.repeat_count}회 · "
+                    f"실제 {format_duration(plan.output_seconds)} · "
+                    f"초과 {format_duration(plan.overflow_seconds)}"
+                )
+            else:
+                text = (
+                    f"1회 길이 {format_duration(plan.base_seconds)} · "
+                    f"{plan.repeat_count}회 · "
+                    f"예상 출력 {format_duration(plan.output_seconds)}"
+                )
+        except (TypeError, ValueError):
+            text = "반복 설정에 0 이상의 정수를 입력해 주세요."
+        self.loop_summary_label.configure(text=text)
 
     def refresh(self):
         self.queue_listbox.delete(0, tk.END)
@@ -2167,6 +3340,7 @@ class Stage3VideoEdit(tk.Frame):
                         if not vg.get('bg_image'):
                             vg['bg_image'] = t.filepath
                     break
+        self._update_repeat_summary()
 
     def _sync_group_bg(self, save=True):
         """그룹 전환 시 bg_image를 UI ↔ video_group dict 사이로 동기화."""
@@ -2186,6 +3360,8 @@ class Stage3VideoEdit(tk.Frame):
         populate_group_tabs(self.tabs_container, self.app.video_groups, idx, self._set_group)
         self._sync_group_bg(save=False)
         self._stop_scrub_play()
+        self._preview_generation += 1
+        preview_generation = self._preview_generation
         self._live_renderer = None
         self._live_duration = 0.0
         self.scrub_var.set(0)
@@ -2193,22 +3369,76 @@ class Stage3VideoEdit(tk.Frame):
         self.preview_canvas.delete("all")
         self._last_preview_pil_frame = None
         self._preview_status_label.configure(text=f"Mix {idx+1} 선택됨 — 새로고침을 눌러 미리보기")
+        self._update_repeat_summary()
 
     def _pick_bg(self):
         p = filedialog.askopenfilename(filetypes=[("이미지", " ".join(f"*{e}" for e in IMAGE_EXTS))])
         if p: self.bg_image.set(p)
 
+    def _pick_overlay(self, variable):
+        path = filedialog.askopenfilename(
+            filetypes=[("이미지", " ".join(f"*{e}" for e in IMAGE_EXTS))]
+        )
+        if path:
+            variable.set(path)
+
     def _collect_config(self):
+        viz_type_map = {
+            "기본 막대형": "eq_bars",
+            "미니멀 라인형": "waveform",
+            "스펙트럼형": "spectrum",
+            "원형": "circles",
+            "중앙 방사형": "radial",
+            "사용 안 함": "none",
+        }
         return {
-            "background": {"image": self.bg_image.get() or None, "opacity": 1.0, "blur": 0, "darken": 0.0},
-            "visualizer": {"type": self.viz_type.get(), "position": self.viz_pos.get(), "color": self.viz_color.get(),
-                           "opacity": 0.85, "bar_count": int(self.viz_bars.get()), "height": int(self.viz_height.get()),
-                           "smoothing": self.viz_smooth.get(), "mirror": False, "gradient": True,
+            "background": {
+                "image": self.bg_image.get() or None, "opacity": 1.0,
+                "blur": 0, "darken": 0.0, "fit": self.bg_fit_var.get(),
+            },
+            "overlays": {
+                "album": {
+                    "image": self.album_image_var.get() or None,
+                    "x": int(self.album_x_var.get()),
+                    "y": int(self.album_y_var.get()),
+                    "width": int(self.album_width_var.get()),
+                    "opacity": self.album_opacity_var.get(),
+                },
+                "logo": {
+                    "image": self.logo_image_var.get() or None,
+                    "x": int(self.logo_x_var.get()),
+                    "y": int(self.logo_y_var.get()),
+                    "width": int(self.logo_width_var.get()),
+                    "opacity": self.logo_opacity_var.get(),
+                },
+            },
+            "visualizer": {"type": viz_type_map.get(self.viz_type.get(), self.viz_type.get()), "position": self.viz_pos.get(), "color": self.viz_color.get(),
+                           "opacity": self.viz_opacity.get(), "bar_count": int(self.viz_bars.get()), "height": int(self.viz_height.get()),
+                           "smoothing": self.viz_smooth.get(),
+                           "mirror": self.viz_mirror.get(),
+                           "invert": self.viz_invert.get(),
+                           "gradient": self.viz_gradient.get(),
+                           "bar_width": int(self.viz_bar_width.get()),
+                           "bar_gap": int(self.viz_bar_gap.get()),
+                           "min_height": int(self.viz_min_height.get()),
+                           "sensitivity": self.viz_sensitivity.get(),
+                           "corner_radius": int(self.viz_corner_radius.get()),
+                           "decay": self.viz_decay.get(),
+                           "glow": int(self.viz_glow.get()),
+                           "line_width": int(self.viz_line_width.get()),
                            "x": int(self.viz_x_var.get()), "y": int(self.viz_y_var.get()),
                            "width": int(self.viz_w_var.get()), "height_override": 0},
             "text": {"show_title": self.show_title.get(), "show_bpm": self.show_bpm.get(), "show_key": self.show_key.get(),
                      "show_camelot": self.show_camelot.get(), "show_time": self.show_time.get(), "position": "center",
-                     "font_size": 42, "sub_font_size": 28, "color": "#ffffff",
+                     "font_size": int(self.text_font_size_var.get()),
+                     "sub_font_size": int(self.text_sub_font_size_var.get()),
+                     "color": self.text_color_var.get(),
+                     "align": self.text_align_var.get(),
+                     "x": self.text_x_var.get(),
+                     "y": self.text_y_var.get(),
+                     "bold": self.text_bold_var.get(),
+                     "italic": self.text_italic_var.get(),
+                     "underline": self.text_underline_var.get(),
                      "shadow": True, "shadow_color": "#000000", "shadow_offset": 3,
                      "text_font_family": self.text_font_family_var.get(),
                      "custom_text": self.custom_text_var.get(),
@@ -2283,12 +3513,30 @@ class Stage3VideoEdit(tk.Frame):
 
         if self._live_renderer:
             # 오디오는 그대로 두고 시각 설정만 즉시 반영 (오디오 재믹싱 없어서 빠름)
-            self._live_renderer.reconfigure(config)
+            with self._preview_render_lock:
+                self._live_renderer.reconfigure(config)
             self._render_scrub_frame(self.scrub_var.get())
             self._preview_status_label.configure(text=f"설정 반영됨 (Mix {idx+1})")
         else:
             # 아직 준비된 렌더러가 없으면(최초 1회) 오디오 믹싱부터 진행
             self._preview_render_video()
+
+    def _selected_resolution(self):
+        resolution_map = {
+            "720p": (1280, 720),
+            "1080p": (1920, 1080),
+            "4k": (3840, 2160),
+            "세로 1080x1920": (1080, 1920),
+            "정사각 1080x1080": (1080, 1080),
+        }
+        if self.resolution.get() != "사용자 지정":
+            return resolution_map.get(self.resolution.get(), (1920, 1080))
+        width = int(self.custom_width_var.get())
+        height = int(self.custom_height_var.get())
+        if not (64 <= width <= 7680 and 64 <= height <= 7680):
+            raise ValueError("사용자 지정 해상도는 각 변이 64~7680이어야 합니다.")
+        # Most H.264 encoders require even dimensions.
+        return width - width % 2, height - height % 2
 
     def _preview_render_video(self):
         if not self.app.video_groups:
@@ -2308,7 +3556,14 @@ class Stage3VideoEdit(tk.Frame):
         config['clip_interval_unit'] = g.get('clip_interval_unit', '초')
         config['clip_random'] = g.get('clip_random', False)
         config['clip_random_base'] = g.get('clip_random_base', 'BPM')
-        pw, ph = 640, 360
+        # Render in the actual output coordinate system. The preview canvas
+        # scales the completed frame as one unit, preserving every size,
+        # position, radius and stroke exactly.
+        try:
+            pw, ph = self._selected_resolution()
+        except ValueError as error:
+            messagebox.showwarning("해상도 오류", str(error))
+            return
 
         analyses = []
         tracks_data = []
@@ -2353,7 +3608,12 @@ class Stage3VideoEdit(tk.Frame):
                     config_dict=config,
                 )
 
-                self.after(0, lambda: self._on_live_renderer_ready(renderer, dur))
+                self.after(
+                    0,
+                    lambda: self._on_live_renderer_ready(
+                        renderer, dur, preview_generation
+                    ),
+                )
             except Exception as e:
                 self.after(0, lambda: (
                     messagebox.showerror("오류", f"미리보기 준비 실패:\n{e}"),
@@ -2363,7 +3623,12 @@ class Stage3VideoEdit(tk.Frame):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _on_live_renderer_ready(self, renderer, duration):
+    def _on_live_renderer_ready(self, renderer, duration, generation=None):
+        if (
+            generation is not None
+            and generation != self._preview_generation
+        ):
+            return
         self._live_renderer = renderer
         self._live_duration = duration
         self.scrub_scale.state(['!disabled'])
@@ -2400,11 +3665,37 @@ class Stage3VideoEdit(tk.Frame):
     def _render_scrub_frame(self, t):
         if not self._live_renderer:
             return
-        try:
-            arr = self._live_renderer.render_frame(float(t))
-        except Exception:
+        self._preview_requested_t = float(t)
+        if self._preview_frame_worker_active:
             return
-        self._show_pil_frame_fit(_PIL_Image.fromarray(arr))
+        self._preview_frame_worker_active = True
+
+        def run():
+            try:
+                while self._preview_requested_t is not None:
+                    requested = self._preview_requested_t
+                    self._preview_requested_t = None
+                    with self._preview_render_lock:
+                        renderer = self._live_renderer
+                        if renderer is None:
+                            return
+                        arr = renderer.render_frame(requested)
+                    image = _PIL_Image.fromarray(arr)
+                    self.after(
+                        0, lambda img=image: self._show_pil_frame_fit(img)
+                    )
+            except Exception:
+                pass
+            finally:
+                self._preview_frame_worker_active = False
+                if self._preview_requested_t is not None:
+                    self.after(
+                        0, lambda: self._render_scrub_frame(
+                            self._preview_requested_t
+                        )
+                    )
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_scrub_drag(self, value):
         if getattr(self, '_programmatic_scrub', False):
@@ -2448,64 +3739,162 @@ class Stage3VideoEdit(tk.Frame):
             self._scrub_after_id = None
         self.preview_play_btn.configure(state=tk.NORMAL, text="▶ 실시간 재생", command=self._start_scrub_play)
 
-    def _start_render(self):
+    def _start_render(self, out_dir_override=None, skip_completed=False):
         if not self.app.video_groups:
             messagebox.showwarning("경고", "먼저 분배를 실행하세요.")
             return
-        out_dir = filedialog.askdirectory(title="저장 폴더 선택")
+        out_dir = out_dir_override or filedialog.askdirectory(title="저장 폴더 선택")
         if not out_dir: return
+        self._last_render_dir = out_dir
+        from render_jobs import RenderJob
+        self._render_job = RenderJob(out_dir)
+        self._render_cancel_event = self._render_job.cancel_event
 
         self.render_btn.configure(state=tk.DISABLED, text="렌더링 중...")
+        self.cancel_render_btn.configure(state=tk.NORMAL)
+        self.retry_render_btn.configure(state=tk.DISABLED)
         self._sync_group_bg(save=True)
-        res_map = {"720p": (1280, 720), "1080p": (1920, 1080), "4k": (3840, 2160)}
-        w, h = res_map.get(self.resolution.get(), (1920, 1080))
+        try:
+            w, h = self._selected_resolution()
+        except (TypeError, ValueError) as error:
+            messagebox.showwarning("해상도 오류", str(error))
+            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
+            self.cancel_render_btn.configure(state=tk.DISABLED)
+            return
+        loop_enabled = self.loop_video_var.get()
+        try:
+            repeat_mode = self.loop_mode_var.get()
+            repeat_count = int(self.loop_count_var.get() or "1")
+            from repeat_settings import hms_to_seconds
+            repeat_target_seconds = hms_to_seconds(
+                self.loop_target_h_var.get() or "0",
+                self.loop_target_m_var.get() or "0",
+                self.loop_target_s_var.get() or "0",
+            )
+        except (TypeError, ValueError):
+            messagebox.showwarning(
+                "입력 오류", "반복 횟수와 목표시간에는 0 이상의 정수를 입력하세요."
+            )
+            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
+            self._sync_group_bg(save=False)
+            return
+        if loop_enabled and repeat_mode == "반복 횟수" and repeat_count < 1:
+            messagebox.showwarning("입력 오류", "반복 횟수는 1 이상이어야 합니다.")
+            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
+            self._sync_group_bg(save=False)
+            return
+        if (
+            loop_enabled
+            and repeat_mode == "목표 재생시간"
+            and repeat_target_seconds <= 0
+        ):
+            messagebox.showwarning("입력 오류", "목표 재생시간은 0보다 커야 합니다.")
+            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
+            self._sync_group_bg(save=False)
+            return
+        render_fps = int(self.fps_var.get())
+        codec_map = {
+            "자동": "auto",
+            "CPU (libx264)": "libx264",
+            "NVIDIA (h264_nvenc)": "h264_nvenc",
+            "Intel (h264_qsv)": "h264_qsv",
+            "AMD (h264_amf)": "h264_amf",
+        }
+        render_video_codec = codec_map.get(
+            self.video_codec_var.get(), "auto"
+        )
+        render_audio_codec = self.audio_codec_var.get()
+        render_video_bitrate = self.video_bitrate_var.get().strip() or "5000k"
+        render_audio_bitrate = self.audio_bitrate_var.get().strip() or "192k"
+        normalize_loudness = self.normalize_loudness_var.get()
+        render_groups = []
+        for group in self.app.video_groups:
+            snapshot = dict(group)
+            snapshot['tracks'] = [dict(track) for track in group.get('tracks', [])]
+            snapshot['clips'] = [
+                dict(clip) for clip in group.get('clips', [])
+            ]
+            render_groups.append(snapshot)
+        base_render_config = self._collect_config()
+        group_render_configs = []
+        for group in render_groups:
+            config = copy.deepcopy(base_render_config)
+            config['background']['image'] = group.get(
+                'bg_image', config['background'].get('image')
+            )
+            config['clips'] = copy.deepcopy(group.get('clips', []))
+            config['clip_enabled'] = group.get('clip_enabled', False)
+            config['clip_interval'] = group.get('clip_interval', 1.0)
+            config['clip_interval_unit'] = group.get(
+                'clip_interval_unit', '초'
+            )
+            config['clip_random'] = group.get('clip_random', False)
+            config['clip_random_base'] = group.get(
+                'clip_random_base', 'BPM'
+            )
+            group_render_configs.append(config)
+        project_state_snapshot = self.app.collect_project_state()
+        all_analysis_map = {
+            track.filepath: track.analysis
+            for track in self.app.tracks if track.analysis
+        }
+        try:
+            target_lufs = float(self.target_lufs_var.get())
+        except ValueError:
+            messagebox.showwarning("입력 오류", "목표 LUFS를 숫자로 입력하세요.")
+            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
+            self.cancel_render_btn.configure(state=tk.DISABLED)
+            self._sync_group_bg(save=False)
+            return
 
         def run():
             try:
-                total_groups = len(self.app.video_groups)
+                total_groups = len(render_groups)
                 self.after(0, lambda t=total_groups: self._render_set_progress(0, t, 0))
-                for gi, g in enumerate(self.app.video_groups):
+                for gi, g in enumerate(render_groups):
+                    if self._render_cancel_event.is_set():
+                        raise RuntimeError("사용자가 렌더링을 취소했습니다.")
                     tracks = g.get('tracks', [])
                     if not tracks: continue
+                    if skip_completed and self._render_job.is_completed(gi):
+                        self.after(
+                            0, lambda ii=gi: self._update_queue(ii, "기존 완료본 유지")
+                        )
+                        continue
                     self.after(0, lambda ii=gi: self._update_queue(ii, "믹싱 중..."))
 
-                    analyses = [t['analysis'] for t in tracks if t.get('analysis')]
+                    valid_tracks = [
+                        t for t in tracks
+                        if t.get('analysis') and t.get('filepath')
+                    ]
+                    analyses = [t['analysis'] for t in valid_tracks]
                     if not analyses: continue
-
-                    tracks_data = []
-                    for t in tracks:
-                        if not t.get('analysis'): continue
-                        fp = t.get('filepath', '') or (t.get('track', {}).get('filepath', '') if isinstance(t.get('track'), dict) else getattr(t.get('track'), 'filepath', ''))
-                        if not fp:
-                            continue
-                        samples, sr = _load_audio_pydub(fp)
-                        ts = t.get('trim_start', 0)
-                        te = t.get('trim_end', 0)
-                        dur = t.get('duration', len(samples) / sr)
-                        if te <= 0:
-                            te = dur
-                        if ts > 0 or te < dur:
-                            s_s = int(ts * sr)
-                            e_s = int(te * sr)
-                            samples = samples[s_s:e_s]
-                        tracks_data.append((samples, sr))
 
                     g_dir = os.path.join(out_dir, f"mix_{gi+1}")
                     os.makedirs(g_dir, exist_ok=True)
 
                     a_out = os.path.join(g_dir, "audio.wav")
-                    _, dur, timestamps = _create_mixed_audio(analyses, tracks_data, a_out, 4.0)
+                    from audio_pipeline import mix_tracks_streaming, normalize_loudness as normalize_audio
+                    ffmpeg_exe = video_gen._find_ffmpeg_exe()
+                    _, dur, timestamps = mix_tracks_streaming(
+                        ffmpeg_exe, analyses, valid_tracks, a_out, 4.0,
+                        cancel_event=self._render_cancel_event,
+                    )
+                    if normalize_loudness:
+                        self.after(
+                            0, lambda ii=gi: self._update_queue(ii, "음량 정규화 중...")
+                        )
+                        normalized_out = os.path.join(g_dir, "audio_normalized.wav")
+                        normalize_audio(
+                            ffmpeg_exe, a_out, normalized_out,
+                            target_lufs=target_lufs, true_peak=-1.5,
+                            cancel_event=self._render_cancel_event,
+                        )
+                        os.replace(normalized_out, a_out)
 
                     self.after(0, lambda ii=gi: self._update_queue(ii, "영상 생성 중..."))
 
-                    self.bg_image.set(g.get('bg_image', ''))
-                    config = self._collect_config()
-                    config['clips'] = g.get('clips', [])
-                    config['clip_enabled'] = g.get('clip_enabled', False)
-                    config['clip_interval'] = g.get('clip_interval', 1.0)
-                    config['clip_interval_unit'] = g.get('clip_interval_unit', '초')
-                    config['clip_random'] = g.get('clip_random', False)
-                    config['clip_random_base'] = g.get('clip_random_base', 'BPM')
+                    config = group_render_configs[gi]
                     vc = os.path.join(g_dir, "_visual.json")
                     with open(vc, 'w', encoding='utf-8') as f:
                         json.dump(config, f, indent=2, ensure_ascii=False)
@@ -2513,6 +3902,10 @@ class Stage3VideoEdit(tk.Frame):
                     _last_progress_ts = [0.0]
 
                     def _on_frame_progress(value, total, ii=gi, tt=total_groups):
+                        if self._render_cancel_event.is_set():
+                            raise video_gen.RenderCancelledError(
+                                "사용자가 렌더링을 취소했습니다."
+                            )
                         now = time.time()
                         if now - _last_progress_ts[0] < 0.2 and value < total:
                             return
@@ -2529,24 +3922,68 @@ class Stage3VideoEdit(tk.Frame):
                                    visual_config_path=vc, timestamps=timestamps,
                                    crossfade_duration=4.0,
                                    frame_progress_callback=_on_frame_progress,
-                                   fps=int(self.fps_var.get()))
+                                   fps=render_fps,
+                                   video_codec=render_video_codec,
+                                   audio_codec=render_audio_codec,
+                                   video_bitrate=render_video_bitrate,
+                                   audio_bitrate=render_audio_bitrate)
 
                     txt_path = os.path.join(g_dir, "timestamps.txt")
                     self._save_timestamps_txt(txt_path, timestamps, dur)
 
-                    self.after(0, lambda ii=gi: self._update_queue(ii, "완료!"))
+                    if loop_enabled:
+                        if self._render_cancel_event.is_set():
+                            raise RuntimeError("사용자가 렌더링을 취소했습니다.")
+                        self.after(
+                            0, lambda ii=gi: self._update_queue(
+                                ii, "완성 영상 반복 중..."
+                            )
+                        )
+                        from repeat_settings import (
+                            MODE_COUNT, MODE_TARGET, build_repeat_plan,
+                        )
+                        repeat_plan = build_repeat_plan(
+                            dur,
+                            enabled=True,
+                            mode=(
+                                MODE_TARGET
+                                if repeat_mode == "목표 재생시간"
+                                else MODE_COUNT
+                            ),
+                            repeat_count=repeat_count,
+                            target_seconds=repeat_target_seconds,
+                        )
+                        loop_label = (
+                            f"target_{repeat_target_seconds}s"
+                            if repeat_plan.mode == MODE_TARGET
+                            else f"{repeat_plan.repeat_count}x"
+                        )
+                        loop_out = os.path.join(
+                            g_dir, f"mix_{gi+1}_loop_{loop_label}.mp4"
+                        )
+                        video_gen.loop_video_repetitions(
+                            v_out, loop_out, repeat_plan.repeat_count,
+                            cancel_event=self._render_cancel_event,
+                        )
+
+                    done_text = "완료! (반복본 포함)" if loop_enabled else "완료!"
+                    self.after(
+                        0, lambda ii=gi, text=done_text: self._update_queue(ii, text)
+                    )
                     self.after(0, lambda ii=gi, tt=total_groups: self._render_set_progress(ii+1, tt, (ii+1)/max(tt,1)))
 
                 if self.app.project and self.app.project.project_dir:
                     self.app.project.target_duration = self.app.stages[0].get_target_seconds()
                     self.app.project.tolerance = self.app.stages[0].get_tolerance()
-                    analyses = {}
-                    for t in self.app.tracks:
-                        if t.analysis:
-                            analyses[t.filepath] = t.analysis
-                    self.app.project.save(analyses=analyses, video_groups=self.app.video_groups)
+                    with self.app._project_save_lock:
+                        self.app.project.save(
+                            analyses=all_analysis_map,
+                            video_groups=self.app.video_groups,
+                            app_state=project_state_snapshot,
+                        )
 
                 self.after(0, lambda: (self.render_status.configure(text="전체 렌더링 완료!"),
+                                       self.retry_render_btn.configure(state=tk.DISABLED),
                                        messagebox.showinfo("완료", f"{out_dir}에 저장되었습니다")))
 
             except Exception as e:
@@ -2559,14 +3996,28 @@ class Stage3VideoEdit(tk.Frame):
                 except Exception:
                     pass
                 self.after(0, lambda: self.render_status.configure(text=f"오류: {e}"))
+                self.after(0, lambda: self.retry_render_btn.configure(state=tk.NORMAL))
                 self.after(0, lambda: messagebox.showerror("오류", f"{e}\n\n자세한 내용은 render_error.log 확인"))
             finally:
                 def _restore():
                     self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
+                    self.cancel_render_btn.configure(state=tk.DISABLED, text="렌더링 취소")
                     self._sync_group_bg(save=False)
                 self.after(0, _restore)
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _cancel_render(self):
+        if self._render_job:
+            self._render_job.cancel()
+        self.cancel_render_btn.configure(state=tk.DISABLED, text="취소 요청됨...")
+        self.render_status.configure(text="현재 인코딩 작업을 안전하게 중단하는 중...")
+
+    def _retry_render(self):
+        if not self._last_render_dir:
+            messagebox.showinfo("재시도", "재시도할 이전 렌더 작업이 없습니다.")
+            return
+        self._start_render(self._last_render_dir, skip_completed=True)
 
     def _update_queue(self, idx, text):
         dur = self.app.video_groups[idx].get('total_duration', 0)
@@ -2606,6 +4057,11 @@ class AutoPlaylistMakerApp:
         self.project = _Project()
         self.current_stage = 0
         self.dark_mode = True
+        self.dirty = False
+        self._suspend_state_tracking = False
+        self._state_save_after_id = None
+        self._project_save_lock = threading.Lock()
+        self._project_save_generation = 0
 
         root = None
         if '--safe' not in sys.argv:
@@ -2618,23 +4074,165 @@ class AutoPlaylistMakerApp:
             root = tk.Tk()
 
         self.root = root
-        self.root.title("Auto Playlist Maker")
+        self.root.title(f"Auto Playlist Maker v{APP_VERSION}")
         self.root.geometry("1200x750")
         self.root.minsize(950, 620)
         self.root.configure(bg=THEME['bg_main'])
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._set_icon()
 
         self._apply_theme()
         self.build_nav()
         self.build_stages()
         self.show_stage(0)
+        self._install_dirty_tracking()
+
+    def collect_project_state(self):
+        from ui_state import capture_pages
+        def safe_int(value, default=0):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        pages = capture_pages(self.stages) if hasattr(self, 'stages') else []
+        design = {}
+        visualizer = {}
+        render = {}
+        repeat = {}
+        if hasattr(self, 'stages') and len(self.stages) > 4:
+            stage = self.stages[4]
+            config = stage._collect_config()
+            design = {
+                key: config[key]
+                for key in (
+                    'background', 'overlays', 'text', 'progress_bar',
+                    'fade', 'effects'
+                )
+                if key in config
+            }
+            visualizer = config.get('visualizer', {})
+            render = {
+                'resolution': stage.resolution.get(),
+                'fps': stage.fps_var.get(),
+                'video_codec': stage.video_codec_var.get(),
+                'audio_codec': stage.audio_codec_var.get(),
+                'video_bitrate': stage.video_bitrate_var.get(),
+                'audio_bitrate': stage.audio_bitrate_var.get(),
+                'normalize_loudness': stage.normalize_loudness_var.get(),
+                'target_lufs': stage.target_lufs_var.get(),
+                'output_dir': stage._last_render_dir or '',
+            }
+            repeat = {
+                'enabled': stage.loop_video_var.get(),
+                'mode': (
+                    'target'
+                    if stage.loop_mode_var.get() == "목표 재생시간"
+                    else 'count'
+                ),
+                'count': safe_int(stage.loop_count_var.get(), 1),
+                'target_h': safe_int(stage.loop_target_h_var.get()),
+                'target_m': safe_int(stage.loop_target_m_var.get()),
+                'target_s': safe_int(stage.loop_target_s_var.get()),
+            }
+        return {
+            'current_step': self.current_stage,
+            'step_complete': {
+                'import': bool(self.tracks),
+                'distribution': bool(self.video_groups),
+                'audio_edit': bool(self.video_groups),
+                'clips': any(
+                    group.get('clips') for group in self.video_groups
+                ),
+                'design': bool(design),
+            },
+            'pages': pages,
+            'distribution': {'group_count': len(self.video_groups)},
+            'design': design,
+            'visualizer': visualizer,
+            'render': render,
+            'repeat': repeat,
+            'ui': {'dark_mode': self.dark_mode},
+        }
+
+    def restore_project_state(self, state):
+        if not state:
+            return
+        from ui_state import restore_pages
+        self._suspend_state_tracking = True
+        try:
+            restore_pages(self.stages, state.get('pages', []))
+            if len(self.stages) > 4:
+                self.stages[4]._last_render_dir = state.get(
+                    'render', {}
+                ).get('output_dir') or None
+            step = int(state.get('current_step', 0))
+            self.show_stage(max(0, min(step, len(self.stages) - 1)))
+        finally:
+            self._suspend_state_tracking = False
+
+    def _install_dirty_tracking(self):
+        for stage in getattr(self, 'stages', []):
+            for value in vars(stage).values():
+                if isinstance(value, tk.Variable):
+                    value.trace_add("write", self._on_project_variable_changed)
+
+    def _on_project_variable_changed(self, *_args):
+        if self._suspend_state_tracking:
+            return
+        self.set_dirty(True)
+        if self._state_save_after_id:
+            try:
+                self.root.after_cancel(self._state_save_after_id)
+            except tk.TclError:
+                pass
+        self._state_save_after_id = self.root.after(
+            700, self._autosave_project_state
+        )
+
+    def _autosave_project_state(self):
+        self._state_save_after_id = None
+        self.persist_video_groups()
+
+    def set_dirty(self, dirty=True):
+        self.dirty = bool(dirty)
+        if not self.dirty and self._state_save_after_id:
+            try:
+                self.root.after_cancel(self._state_save_after_id)
+            except tk.TclError:
+                pass
+            self._state_save_after_id = None
+        if hasattr(self, 'project_label'):
+            name = self.project.name if self.project else ""
+            suffix = " · 저장되지 않은 변경사항" if self.dirty else ""
+            self.project_label.configure(
+                text=(f"프로젝트: {name}{suffix}" if name else suffix.lstrip(" ·"))
+            )
+
+    def _on_close(self):
+        if self.dirty and not messagebox.askyesno(
+            "저장되지 않은 변경사항",
+            "저장되지 않은 변경사항이 있습니다. 저장하지 않고 종료할까요?",
+        ):
+            return
+        if self._state_save_after_id:
+            try:
+                self.root.after_cancel(self._state_save_after_id)
+            except tk.TclError:
+                pass
+            self._state_save_after_id = None
+        for stage in getattr(self, 'stages', []):
+            if hasattr(stage, 'on_hide'):
+                stage.on_hide()
+        try:
+            for after_id in self.root.tk.call('after', 'info'):
+                self.root.after_cancel(after_id)
+        except tk.TclError:
+            pass
+        self.root.destroy()
 
     def _set_icon(self):
-        try:
-            if sys.platform == 'win32':
-                self.root.iconbitmap(default='')
-        except:
-            pass
+        apply_window_icon(self.root)
 
     def _apply_theme(self):
         global THEME
@@ -2672,6 +4270,8 @@ class AutoPlaylistMakerApp:
         self.next_btn.configure(state=tk.DISABLED)
 
     def _toggle_theme(self):
+        from ui_state import capture_pages
+        stage_state = capture_pages(self.stages)
         self.dark_mode = not self.dark_mode
         self._apply_theme()
 
@@ -2687,10 +4287,13 @@ class AutoPlaylistMakerApp:
         self.next_btn.configure(bg=THEME['accent'], fg="#ffffff",
                                 activebackground=THEME['accent_h'])
 
-        self._rebuild_stages()
+        self._rebuild_stages(stage_state)
 
-    def _rebuild_stages(self):
+    def _rebuild_stages(self, stage_state=None):
         if hasattr(self, '_stage_container'):
+            for stage in getattr(self, 'stages', []):
+                if hasattr(stage, 'on_hide'):
+                    stage.on_hide()
             self._stage_container.destroy()
 
         self._stage_container = tk.Frame(self.root, bg=THEME['bg_main'])
@@ -2706,6 +4309,10 @@ class AutoPlaylistMakerApp:
         self.titles = ["1/5  프로젝트 + 가져오기", "2/5  분배",
                        "3/5  음악 편집", "4/5  클립 목록", "5/5  영상 편집 + 렌더링"]
 
+        if stage_state:
+            from ui_state import restore_pages
+            restore_pages(self.stages, stage_state)
+        self._install_dirty_tracking()
         self.show_stage(self.current_stage)
 
     def build_stages(self):
@@ -2723,6 +4330,14 @@ class AutoPlaylistMakerApp:
                        "3/5  음악 편집", "4/5  클립 목록", "5/5  영상 편집 + 렌더링"]
 
     def show_stage(self, idx):
+        if (
+            hasattr(self, 'stages')
+            and 0 <= self.current_stage < len(self.stages)
+            and self.current_stage != idx
+        ):
+            current = self.stages[self.current_stage]
+            if hasattr(current, 'on_hide'):
+                current.on_hide()
         for s in self.stages:
             s.pack_forget()
         self.current_stage = idx
@@ -2768,6 +4383,49 @@ class AutoPlaylistMakerApp:
     def enable_next(self, enabled=True):
         self.next_btn.configure(state=tk.NORMAL if enabled else tk.DISABLED)
 
+    def persist_video_groups(self):
+        """Atomically persist lightweight edit metadata without rewriting caches."""
+        project = self.project
+        self.set_dirty(True)
+        if not project or not project.project_file or not os.path.isfile(project.project_file):
+            return
+        app_state = self.collect_project_state()
+        self._project_save_generation += 1
+        save_generation = self._project_save_generation
+        groups_snapshot = []
+        for group in self.video_groups:
+            snapshot = dict(group)
+            snapshot['tracks'] = [
+                dict(track) for track in group.get('tracks', [])
+            ]
+            snapshot['clips'] = [
+                dict(clip) for clip in group.get('clips', [])
+            ]
+            groups_snapshot.append(snapshot)
+
+        def save():
+            try:
+                with self._project_save_lock:
+                    if save_generation != self._project_save_generation:
+                        return
+                    project.save(
+                        analyses=None,
+                        video_groups=groups_snapshot,
+                        app_state=app_state,
+                    )
+                self.root.after(
+                    0,
+                    lambda: (
+                        self.set_dirty(False)
+                        if save_generation == self._project_save_generation
+                        else None
+                    ),
+                )
+            except Exception as error:
+                print(f"프로젝트 자동 저장 실패: {error}")
+
+        threading.Thread(target=save, daemon=True).start()
+
     def go_next(self):
         if self.current_stage < len(self.stages) - 1:
             self.show_stage(self.current_stage + 1)
@@ -2786,36 +4444,50 @@ class SplashScreen:
     def __init__(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
-        self.root.configure(bg='#202225')
+        self.root.configure(bg='#090a0f')
         self.root.attributes('-topmost', True)
         self.root.resizable(False, False)
+        apply_window_icon(self.root)
 
-        w, h = 400, 210
+        w, h = 440, 300
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         x = (sw - w) // 2
         y = (sh - h) // 2
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
-        outer = tk.Frame(self.root, bg='#5865f2', padx=2, pady=2)
+        outer = tk.Frame(self.root, bg='#26243d', padx=1, pady=1)
         outer.pack(fill=tk.BOTH, expand=True)
-        inner = tk.Frame(outer, bg='#36393f')
+        inner = tk.Frame(outer, bg='#090a0f')
         inner.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(inner, text="Auto Playlist Maker", font=("D2Coding", 22, "bold"),
-                 bg='#36393f', fg='#ffffff').pack(pady=(24, 2))
-        tk.Label(inner, text="v1.1.0", font=("D2Coding", 11),
-                 bg='#36393f', fg='#96989d').pack()
+        try:
+            self.icon_image = tk.PhotoImage(file=resource_path("app_icon.png"))
+            self.icon_image = self.icon_image.subsample(4, 4)
+            tk.Label(
+                inner,
+                image=self.icon_image,
+                bg="#090a0f",
+                borderwidth=0,
+                highlightthickness=0,
+            ).pack(pady=(18, 2))
+        except (OSError, tk.TclError):
+            self.icon_image = None
+
+        tk.Label(inner, text="Auto Playlist Maker", font=("D2Coding", 19, "bold"),
+                 bg='#090a0f', fg='#f4f4f7').pack(pady=(2, 0))
+        tk.Label(inner, text=f"v{APP_VERSION}", font=("D2Coding", 11),
+                 bg='#090a0f', fg='#8e8e98').pack()
 
         self.status_var = tk.StringVar(value="시작 중...")
         self.status_label = tk.Label(inner, textvariable=self.status_var,
-                                     font=("D2Coding", 10), bg='#36393f', fg='#b9bbbe')
-        self.status_label.pack(pady=(16, 6))
+                                     font=("D2Coding", 9), bg='#090a0f', fg='#96969f')
+        self.status_label.pack(pady=(10, 6))
 
-        bar_frame = tk.Frame(inner, bg='#202225', height=8)
-        bar_frame.pack(fill=tk.X, padx=40, pady=(0, 20))
+        bar_frame = tk.Frame(inner, bg='#1b1b25', height=6)
+        bar_frame.pack(fill=tk.X, padx=42, pady=(0, 18))
         bar_frame.pack_propagate(False)
-        self.bar_canvas = tk.Canvas(bar_frame, bg='#202225', highlightthickness=0, height=8)
+        self.bar_canvas = tk.Canvas(bar_frame, bg='#1b1b25', highlightthickness=0, height=6)
         self.bar_canvas.pack(fill=tk.BOTH, expand=True)
 
         self.bar_width = 0
@@ -2833,7 +4505,7 @@ class SplashScreen:
             self.bar_canvas.delete("all")
             if self.bar_width > 0:
                 self.bar_canvas.create_rectangle(0, 0, self.bar_width, 8,
-                                                  fill='#5865f2', outline='')
+                                                  fill='#7667f6', outline='')
             self.root.update_idletasks()
             self.root.update()
         except:
@@ -2939,19 +4611,31 @@ def _write_ffmpeg_log(lines):
 
 
 def main():
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                f"AutoPlaylistMaker.Desktop.{APP_VERSION}"
+            )
+        except (AttributeError, OSError):
+            pass
+
     if getattr(sys, 'frozen', False) and getattr(sys, 'frozen', False):
         if sys.stdout is None:
             sys.stdout = open(os.devnull, 'w', encoding='utf-8')
         if sys.stderr is None:
             sys.stderr = open(os.devnull, 'w', encoding='utf-8')
 
+    splash = SplashScreen()
+    # PyInstaller의 네이티브 스플래시는 one-file 압축 해제 중 즉시 표시된다.
+    # Tk 스플래시가 실제로 그려진 뒤 닫아 두 화면 사이의 공백을 없앤다.
+    splash.root.update_idletasks()
+    splash.root.update()
     try:
         import pyi_splash
         pyi_splash.close()
     except ImportError:
         pass
-
-    splash = SplashScreen()
 
     _load_heavy_modules_step(splash, "numpy 로딩 중...", 0.05)
     import numpy as _numpy
@@ -3033,4 +4717,22 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        try:
+            log_dir = (
+                os.path.dirname(sys.executable)
+                if getattr(sys, 'frozen', False)
+                else os.path.dirname(os.path.abspath(__file__))
+            )
+            with open(
+                os.path.join(log_dir, "startup_error.log"),
+                "w",
+                encoding="utf-8",
+            ) as error_file:
+                error_file.write(traceback.format_exc())
+        except Exception:
+            pass
+        raise

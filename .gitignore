@@ -19,3 +19,15 @@ Thumbs.db
 *.log
 *.npz
 .env
+
+# Build scripts & temp
+*.pid
+build_*.ps1
+test_artifacts/
+
+# Icons & logos
+*.ico
+app_icon*.png
+brand_logo_*.png
+brand_splash*.png
+splash.png
