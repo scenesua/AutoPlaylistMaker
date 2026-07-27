@@ -98,17 +98,12 @@ def _write_log(lines):
 def _detect_gpu_encoder():
     """시스템에 GPU 하드웨어 인코더가 있는지 감지하고 코덱 이름 반환.
     없으면 'libx264' (CPU 소프트웨어 인코딩)을 반환한다."""
-    try:
-        ffmpeg_exe = _find_ffmpeg_exe()
-        if not ffmpeg_exe:
-            return 'libx264'
-
+    def _check(ffmpeg_exe):
         result = subprocess.run(
             [ffmpeg_exe, '-encoders'], capture_output=True, text=True, timeout=10,
             creationflags=_NO_WINDOW,
         )
         encoders = result.stdout
-
         if 'h264_nvenc' in encoders:
             return 'h264_nvenc'
         if 'h264_qsv' in encoders:
@@ -117,6 +112,21 @@ def _detect_gpu_encoder():
             return 'h264_vaapi'
         if 'h264_amf' in encoders:
             return 'h264_amf'
+        return None
+    try:
+        ffmpeg_exe = _find_ffmpeg_exe()
+        if ffmpeg_exe:
+            codec = _check(ffmpeg_exe)
+            if codec:
+                return codec
+    except Exception:
+        pass
+    try:
+        sys_ffmpeg = shutil.which('ffmpeg') or (shutil.which('ffmpeg.exe') if os.name == 'nt' else None)
+        if sys_ffmpeg and os.path.isfile(sys_ffmpeg):
+            codec = _check(sys_ffmpeg)
+            if codec:
+                return codec
     except Exception:
         pass
     return 'libx264'
@@ -1167,7 +1177,7 @@ class LiveFrameRenderer:
                 base_y = 80
 
             if tcfg['show_title']:
-                title = a.filename
+                title = os.path.splitext(a.filename)[0] if tcfg.get('strip_extension', True) else a.filename
                 if len(title) > 40:
                     title = title[:37] + "..."
                 bbox = draw.textbbox((0, 0), title, font=font_title)

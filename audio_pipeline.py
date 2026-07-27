@@ -60,8 +60,8 @@ def mix_tracks_streaming(
             float(spec.get("fade_out", 0.01)), durations[index] / 2
         ))
         chain = (
-            f"[{index}:a]aresample=22050,"
-            "aformat=sample_fmts=fltp:channel_layouts=mono,"
+            f"[{index}:a]aresample=44100,"
+            "aformat=sample_fmts=fltp:channel_layouts=stereo,"
             f"volume={volume:.6f}"
         )
         if fade_in > 0:
@@ -150,8 +150,7 @@ def normalize_loudness(
             f"measured_TP={measured['input_tp']}:"
             f"measured_LRA={measured['input_lra']}:"
             f"measured_thresh={measured['input_thresh']}:"
-            f"offset={measured['target_offset']}:"
-            f"linear=true"
+            f"offset={measured['target_offset']}"
         ),
         "-c:a", "pcm_s16le", output_path,
     ]

@@ -23,6 +23,7 @@ Thumbs.db
 # Build scripts & temp
 *.pid
 build_*.ps1
+!build_windows_onedir.ps1
 test_artifacts/
 
 # Icons & logos

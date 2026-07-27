@@ -322,7 +322,8 @@ def styled_label(parent, text, size=10, bold=False, color=None, **kw):
 
 
 def styled_option_menu(parent, variable, options, **kw):
-    m = tk.OptionMenu(parent, variable, *options)
+    value = options[0] if options else ""
+    m = tk.OptionMenu(parent, variable, value, *options)
     m.configure(
         font=_font(9), bg=THEME['bg_input'], fg=THEME['fg'],
         activebackground=THEME['bg_hover'], activeforeground=THEME['fg'],
@@ -2794,6 +2795,7 @@ class Stage3VideoEdit(tk.Frame):
         self.text_bold_var = tk.BooleanVar(value=False)
         self.text_italic_var = tk.BooleanVar(value=False)
         self.text_underline_var = tk.BooleanVar(value=False)
+        self.text_strip_ext_var = tk.BooleanVar(value=True)
         self.fx_bounce = tk.BooleanVar(value=False)
         self.fx_shake = tk.BooleanVar(value=False)
         self.fx_zoom = tk.BooleanVar(value=False)
@@ -2824,7 +2826,7 @@ class Stage3VideoEdit(tk.Frame):
         self.loop_target_h_var = tk.StringVar(value="1")
         self.loop_target_m_var = tk.StringVar(value="0")
         self.loop_target_s_var = tk.StringVar(value="0")
-        self.normalize_loudness_var = tk.BooleanVar(value=True)
+        self.normalize_loudness_var = tk.BooleanVar(value=False)
         self.target_lufs_var = tk.StringVar(value="-14")
         self._render_cancel_event = threading.Event()
         self._render_job = None
@@ -2961,6 +2963,7 @@ class Stage3VideoEdit(tk.Frame):
         chk("일반 텍스트 굵게", self.text_bold_var)
         chk("일반 텍스트 기울임", self.text_italic_var)
         chk("일반 텍스트 밑줄", self.text_underline_var)
+        chk("확장명 제외", self.text_strip_ext_var)
         sld("텍스트 X:", self.text_x_var, 0, 1, 0.01)
         sld("텍스트 Y:", self.text_y_var, 0, 1, 0.01)
         text_color_row = tk.Frame(sf, bg=THEME['bg_card'])
@@ -3084,14 +3087,23 @@ class Stage3VideoEdit(tk.Frame):
             "Intel (h264_qsv)", "AMD (h264_amf)",
         ])
         opt("오디오 코덱:", self.audio_codec_var, ["aac", "libmp3lame"])
+        _video_bitrate_options = {
+            "720p": ["2500k", "3000k", "4000k", "5000k"],
+            "1080p": ["4000k", "5000k", "6000k", "8000k"],
+            "4k": ["16000k", "20000k", "24000k", "35000k"],
+            "세로 1080x1920": ["4000k", "5000k", "6000k", "8000k"],
+            "정사각 1080x1080": ["4000k", "5000k", "6000k", "8000k"],
+            "사용자 지정": ["4000k", "5000k", "6000k", "8000k"],
+        }
         bitrate_row = tk.Frame(sf, bg=THEME['bg_card'])
         bitrate_row.pack(fill=tk.X, padx=12, pady=2)
         styled_label(
             bitrate_row, "비트레이트:", size=10, bg=THEME['bg_card']
         ).pack(side=tk.LEFT)
-        styled_entry(
-            bitrate_row, textvariable=self.video_bitrate_var, width=8
-        ).pack(side=tk.LEFT, padx=(6, 2))
+        self.video_bitrate_menu = styled_option_menu(
+            bitrate_row, self.video_bitrate_var, []
+        )
+        self.video_bitrate_menu.pack(side=tk.LEFT, padx=(6, 2))
         styled_label(
             bitrate_row, "영상", size=9, bg=THEME['bg_card']
         ).pack(side=tk.LEFT)
@@ -3102,6 +3114,24 @@ class Stage3VideoEdit(tk.Frame):
         styled_label(
             bitrate_row, "오디오", size=9, bg=THEME['bg_card']
         ).pack(side=tk.LEFT)
+
+        def _update_video_bitrate_options(*_):
+            opts = _video_bitrate_options.get(
+                self.resolution.get(),
+                _video_bitrate_options["1080p"],
+            )
+            cur = self.video_bitrate_var.get()
+            if cur not in opts:
+                self.video_bitrate_var.set(opts[len(opts)//2])
+            menu = self.video_bitrate_menu["menu"]
+            menu.delete(0, "end")
+            for o in opts:
+                menu.add_command(
+                    label=o,
+                    command=lambda v=o: self.video_bitrate_var.set(v),
+                )
+        _update_video_bitrate_options()
+        self.resolution.trace_add("write", _update_video_bitrate_options)
 
         sep()
         sec("완성 영상 반복")
@@ -3483,9 +3513,10 @@ class Stage3VideoEdit(tk.Frame):
                      "align": self.text_align_var.get(),
                      "x": self.text_x_var.get(),
                      "y": self.text_y_var.get(),
-                     "bold": self.text_bold_var.get(),
-                     "italic": self.text_italic_var.get(),
-                     "underline": self.text_underline_var.get(),
+                      "bold": self.text_bold_var.get(),
+                      "italic": self.text_italic_var.get(),
+                      "underline": self.text_underline_var.get(),
+                      "strip_extension": self.text_strip_ext_var.get(),
                      "shadow": True, "shadow_color": "#000000", "shadow_offset": 3,
                      "text_font_family": self.text_font_family_var.get(),
                      "custom_text": self.custom_text_var.get(),
@@ -3635,9 +3666,29 @@ class Stage3VideoEdit(tk.Frame):
             except Exception:
                 pass
 
+        # Preview: limit to first ~30s for performance
+        MAX_PREVIEW_SECONDS = 30
+        limited = []
+        cumulative = 0.0
+        crossfade = 4.0
+        for t in valid_tracks:
+            ts = t.get('trim_start', 0)
+            te = t.get('trim_end', 0)
+            if te <= 0:
+                a = t.get('analysis')
+                te = a.duration if a else te
+            dur = max(0.1, te - ts)
+            if cumulative + dur > MAX_PREVIEW_SECONDS and limited:
+                break
+            cumulative += dur
+            limited.append(t)
+        valid_tracks = limited
+        analyses = [t['analysis'] for t in valid_tracks]
+        _plog(f"valid_tracks={len(valid_tracks)}, est_duration={cumulative:.0f}s")
+
         def run():
             _plog(f"=== 미리보기 시작 ===")
-            _plog(f"analyses={len(analyses)}, tracks_data={len(tracks_data)}, pw={pw}, ph={ph}")
+            _plog(f"analyses={len(analyses)}, pw={pw}, ph={ph}")
             try:
                 import tempfile
                 tmp_audio = os.path.join(tempfile.gettempdir(), "_livepreview_audio.wav")
@@ -3646,7 +3697,7 @@ class Stage3VideoEdit(tk.Frame):
                 ffmpeg_exe = video_gen._find_ffmpeg_exe()
                 if not ffmpeg_exe or not os.path.isfile(ffmpeg_exe):
                     raise RuntimeError("ffmpeg를 찾을 수 없습니다.\nsetup.bat을 실행하거나 시스템 PATH에 ffmpeg를 설치하세요.")
-                _, dur, timestamps = mix_tracks_streaming(ffmpeg_exe, analyses, valid_tracks, tmp_audio, 4.0)
+                _, dur, timestamps = mix_tracks_streaming(ffmpeg_exe, analyses, valid_tracks, tmp_audio, crossfade)
                 _plog(f"오디오 믹싱 완료: dur={dur}, timestamps={len(timestamps)}")
 
                 _plog("LiveFrameRenderer 생성 중...")
@@ -4025,7 +4076,14 @@ class Stage3VideoEdit(tk.Frame):
                         )
                         os.replace(normalized_out, a_out)
 
-                    self.after(0, lambda ii=gi: self._update_queue(ii, "영상 생성 중..."))
+                    if render_video_codec == "auto":
+                        from video_gen import _detect_gpu_encoder
+                        _actual_codec = _detect_gpu_encoder()
+                    else:
+                        _actual_codec = render_video_codec
+                    _codec_label = "GPU" if _actual_codec != "libx264" else "CPU"
+
+                    self.after(0, lambda ii=gi: self._update_queue(ii, f"영상 생성 중... ({_codec_label})"))
 
                     config = group_render_configs[gi]
                     vc = os.path.join(g_dir, "_visual.json")
@@ -4033,8 +4091,9 @@ class Stage3VideoEdit(tk.Frame):
                         json.dump(config, f, indent=2, ensure_ascii=False)
 
                     _last_progress_ts = [0.0]
+                    _group_render_start = time.time()
 
-                    def _on_frame_progress(value, total, ii=gi, tt=total_groups):
+                    def _on_frame_progress(value, total, ii=gi, tt=total_groups, cl=_codec_label):
                         if self._render_cancel_event.is_set():
                             raise video_gen.RenderCancelledError(
                                 "사용자가 렌더링을 취소했습니다."
@@ -4045,8 +4104,19 @@ class Stage3VideoEdit(tk.Frame):
                         _last_progress_ts[0] = now
                         frac = value / total if total else 0
                         overall = (ii + frac) / max(tt, 1)
+                        elapsed = now - _group_render_start
+                        if frac > 0:
+                            remaining = (elapsed / frac) - elapsed
+                            if remaining >= 3600:
+                                eta = f", 예상 {int(remaining//3600)}시간 {int(remaining%3600//60)}분"
+                            elif remaining >= 60:
+                                eta = f", 예상 {int(remaining//60)}분 {int(remaining%60)}초"
+                            else:
+                                eta = f", 예상 {int(remaining)}초"
+                        else:
+                            eta = ""
                         self.after(0, lambda: (
-                            self.render_status.configure(text=f"영상 인코딩 중... {int(frac*100)}% (Mix {ii+1}/{tt})"),
+                            self.render_status.configure(text=f"영상 인코딩 중... [{cl}] {int(frac*100)}% (Mix {ii+1}/{tt}){eta}"),
                             self._render_set_progress(ii, tt, overall),
                         ))
 

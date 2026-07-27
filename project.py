@@ -282,6 +282,10 @@ class Project:
                                     'bpm': round(a.bpm, 1), 'key': a.key, 'mode': a.mode,
                                     'camelot': a.camelot, 'duration': round(a.duration, 2),
                                 }
+                    else:
+                        dur = track_info.get('duration')
+                        if dur is not None:
+                            td['duration'] = round(dur, 1)
                     group_data['tracks'].append(td)
                 for clip_info in vg.get('clips', []):
                     group_data['clips'].append({
@@ -358,10 +362,22 @@ class Project:
             if analysis and resolved:
                 self.track_analyses[os.path.abspath(resolved)] = analysis
 
+        backup_to_original = {}
+        for item in self.all_files:
+            orig = item.get('original', '')
+            backup = item.get('backup', '')
+            if orig and backup:
+                backup_to_original[os.path.abspath(backup)] = os.path.abspath(orig)
+
         for group in self.video_groups:
             for track in group.get('tracks', []):
                 if 'analysis' not in track:
                     a = self.get_analysis_for(track.get('filepath', ''))
+                    if not a:
+                        backup_abs = os.path.abspath(track.get('filepath', ''))
+                        orig_abs = backup_to_original.get(backup_abs)
+                        if orig_abs:
+                            a = self.get_analysis_for(orig_abs)
                     if a:
                         track['analysis'] = a
 
