@@ -28,7 +28,9 @@ test_artifacts/
 
 # Icons & logos
 *.ico
+!app_icon.ico
 app_icon*.png
+!app_icon.png
 brand_logo_*.png
 brand_splash*.png
 splash.png
