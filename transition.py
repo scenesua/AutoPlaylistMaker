@@ -1,9 +1,9 @@
 """트랜지션 엔진: 크로스페이드, BPM 매칭, 코드 전환"""
 
 import numpy as np
-import librosa
 import soundfile as sf
 from pydub import AudioSegment
+from i18n import t
 
 
 def load_audio_pydub(filepath, target_sr=22050):
@@ -66,11 +66,10 @@ def equal_power_crossfade(fade_out, fade_in, crossfade_samples):
 
 
 def beat_matched_transition(analysis_a, analysis_b, samples_a, samples_b, sr,
-                             crossfade_duration=4.0):
+    crossfade_duration=4.0):
     beat_duration_a = 60.0 / analysis_a.bpm
-    beat_duration_b = 60.0 / analysis_b.bpm
 
-    crossfade_beats = max(4, int(round(crossfade_duration / beat_duration_a)))
+    crossfade_beats = max(4, round(crossfade_duration / beat_duration_a))
     actual_crossfade_duration = crossfade_beats * beat_duration_a
     crossfade_samples = int(actual_crossfade_duration * sr)
 
@@ -105,9 +104,6 @@ def find_best_mix_point(analysis, position='end', window_beats=4):
     if len(energy) < 2:
         return int(len(analysis.rms) * 0.9)
 
-    bpm = analysis.bpm
-    sr = 22050
-    hop_length = 512
     frames_per_segment = int(len(analysis.rms) / len(energy))
 
     if position == 'end':
@@ -162,7 +158,7 @@ def simple_mix(samples_a, samples_b, sr, crossfade_duration=4.0, bpm_a=120, bpm_
 def create_mixed_audio(analyses, tracks_data, output_path, crossfade_duration=4.0):
     sr = 22050
 
-    print("\n트랜지션 계산 중...")
+    print(t("transition.calculating"))
     total_transition_time = 0
     timestamps = []
 
@@ -186,7 +182,7 @@ def create_mixed_audio(analyses, tracks_data, output_path, crossfade_duration=4.
         'mode': analyses[0].mode,
         'camelot': analyses[0].camelot,
     })
-    print(f"  [1] {analyses[0].filename} (시작: 00:00:00)")
+    print(t("transition.firstTrack", filename=analyses[0].filename))
 
     for i in range(1, len(tracks_data)):
         samples, _ = tracks_data[i]
@@ -223,16 +219,16 @@ def create_mixed_audio(analyses, tracks_data, output_path, crossfade_duration=4.
         total_transition_time += transition_time
         t_m = int(transition_start // 60)
         t_s = int(transition_start % 60)
-        print(f"  [{i+1}] {analyses[i].filename} (전환: {t_m:02d}:{t_s:02d})")
+        print(t("transition.trackTransition", idx=i+1, filename=analyses[i].filename, t_m=t_m, t_s=t_s))
 
-    print(f"\n최종 오디오 정규화 중...")
+    print(t("transition.normalizing"))
     accumulated = accumulated / (np.max(np.abs(accumulated)) + 1e-8)
     accumulated = np.clip(accumulated, -1, 1)
 
-    print(f"저장 중: {output_path}")
+    print(t("transition.savingTo", path=output_path))
     sf.write(output_path, accumulated, sr)
 
     total_duration = len(accumulated) / sr
-    print(f"완료! 총 길이: {total_duration:.1f}s ({total_duration/60:.1f}분)")
+    print(t("transition.complete", duration=total_duration, minutes=total_duration/60))
 
     return output_path, total_duration, timestamps

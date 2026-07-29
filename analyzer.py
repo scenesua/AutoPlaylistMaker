@@ -36,6 +36,12 @@ class TrackAnalysis:
     sr: int = 22050
     hop_length: int = 512
     waveform: np.ndarray = field(default_factory=lambda: np.array([]))
+    integrated_lufs: float | None = None
+    true_peak_dbtp: float | None = None
+    loudness_range: float | None = None
+    sample_peak_dbfs: float | None = None
+    channels: int = 1
+    analysis_version: int = 2
 
 
 def detect_bpm(y, sr):
@@ -80,7 +86,6 @@ def detect_chords_segments(y, sr, hop_length=512):
     onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
     times = librosa.frames_to_time(np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length)
 
-    threshold = np.mean(onset_env) + np.std(onset_env)
     onset_frames = librosa.onset.onset_detect(
         y=y, sr=sr, hop_length=hop_length, onset_envelope=onset_env, backtrack=True
     )
@@ -144,7 +149,6 @@ def compute_energy_profile(y, sr, segment_duration=1.0, rms=None, hop_length=512
 
 
 def analyze_track(filepath):
-    print(f"  분석 중: {filepath}")
     y, sr = librosa.load(filepath, sr=22050, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
@@ -164,6 +168,22 @@ def analyze_track(filepath):
 
     import os
     filename = os.path.basename(filepath)
+    peak = float(np.max(np.abs(y))) if y.size else 0.0
+    sample_peak_dbfs = (
+        float(20 * np.log10(max(peak, 1e-12))) if peak else -120.0
+    )
+    integrated_lufs = true_peak_dbtp = loudness_range = None
+    channels = 1
+    try:
+        import soundfile as sf
+        channels = int(sf.info(filepath).channels)
+        from audio_pipeline import measure_loudness
+        loudness = measure_loudness(filepath)
+        integrated_lufs = loudness["integrated_lufs"]
+        true_peak_dbtp = loudness["true_peak_dbtp"]
+        loudness_range = loudness["loudness_range"]
+    except (OSError, RuntimeError, ValueError, KeyError):
+        pass
 
     analysis = TrackAnalysis(
         filepath=filepath,
@@ -182,9 +202,12 @@ def analyze_track(filepath):
         sr=sr,
         hop_length=hop_length,
         waveform=y,
+        integrated_lufs=integrated_lufs,
+        true_peak_dbtp=true_peak_dbtp,
+        loudness_range=loudness_range,
+        sample_peak_dbfs=sample_peak_dbfs,
+        channels=channels,
     )
-
-    print(f"  -> BPM: {bpm:.1f} | 키: {key} {'메이저' if mode == 'major' else '마이너'} | 캠롯: {camelot} | 길이: {duration:.1f}s")
 
     return analysis
 

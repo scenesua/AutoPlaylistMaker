@@ -9,7 +9,9 @@ import numpy as np
 import soundfile as sf
 
 from analyzer import TrackAnalysis
-from audio_pipeline import mix_tracks_streaming, normalize_loudness
+from audio_pipeline import (
+    mix_ambient_over_media, mix_tracks_streaming, normalize_loudness,
+)
 from video_gen import RenderCancelledError, _find_ffmpeg_exe, generate_video
 
 
@@ -47,7 +49,28 @@ class AudioPipelineTests(unittest.TestCase):
             normalize_loudness(ffmpeg, mixed, normalized)
             self.assertAlmostEqual(duration, 1.8)
             self.assertEqual(len(timestamps), 2)
+            self.assertEqual(
+                [stamp["source_start"] for stamp in timestamps], [0.0, 0.0]
+            )
             self.assertGreater(os.path.getsize(normalized), 1024)
+            samples, rate = sf.read(normalized, always_2d=True)
+            self.assertEqual(rate, 44100)
+            self.assertEqual(samples.shape[1], 2)
+            self.assertTrue(np.isfinite(samples).all())
+            self.assertGreater(float(np.sqrt(np.mean(samples ** 2))), 0.001)
+            self.assertLessEqual(float(np.max(np.abs(samples))), 1.0)
+
+            def dominant_frequency(segment):
+                mono = segment.mean(axis=1)
+                spectrum = np.abs(np.fft.rfft(mono * np.hanning(len(mono))))
+                return np.fft.rfftfreq(len(mono), 1 / rate)[np.argmax(spectrum)]
+
+            first_freq = dominant_frequency(samples[int(.1*rate):int(.6*rate)])
+            second_freq = dominant_frequency(samples[int(1.2*rate):int(1.7*rate)])
+            self.assertAlmostEqual(first_freq, 440, delta=8)
+            self.assertAlmostEqual(second_freq, 660, delta=8)
+            boundary = samples[int(.75*rate):int(1.05*rate)]
+            self.assertGreater(float(np.sqrt(np.mean(boundary ** 2))), 0.001)
 
     def test_track_volume_and_fades_are_applied(self):
         ffmpeg = _find_ffmpeg_exe()
@@ -76,6 +99,100 @@ class AudioPipelineTests(unittest.TestCase):
             ))
             self.assertLess(edge_rms, center_rms * .5)
             self.assertLess(center_rms, .05)
+
+    def test_ambient_bus_is_independent_and_true_peak_limited(self):
+        ffmpeg = _find_ffmpeg_exe()
+        with tempfile.TemporaryDirectory() as root:
+            music = os.path.join(root, "music.wav")
+            ambience = os.path.join(root, "rain.wav")
+            output = os.path.join(root, "mixed.wav")
+            music_stem = os.path.join(root, "music-stem.wav")
+            ambient_stem = os.path.join(root, "ambient-stem.wav")
+            for path, frequency in ((music, 440), (ambience, 90)):
+                subprocess.run([
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i",
+                    f"sine=frequency={frequency}:duration=2",
+                    "-c:a", "pcm_s16le", path,
+                ], check=True)
+            analysis = SimpleNamespace(
+                filename="music.wav", duration=2, bpm=120,
+                key="C", mode="major", camelot="8B",
+                integrated_lufs=-20.0, true_peak_dbtp=-10.0,
+            )
+            settings = {
+                "music_master_db": -6.0,
+                "true_peak_dbtp": -1.0,
+                "ambient_master_db": -3.0,
+                "ambient_tracks": [{
+                    "filepath": ambience, "enabled": True,
+                    "volume_db": -3.0, "pan": 0.4, "width": 1.2,
+                }],
+            }
+            mix_tracks_streaming(
+                ffmpeg, [analysis], [{
+                    "filepath": music, "trim_start": 0, "trim_end": 2,
+                }], output, 0, audio_settings=settings,
+                stem_output_paths={
+                    "music": music_stem, "ambient": ambient_stem,
+                },
+            )
+            self.assertGreater(os.path.getsize(music_stem), 1024)
+            self.assertGreater(os.path.getsize(ambient_stem), 1024)
+            self.assertAlmostEqual(sf.info(output).duration, 2.0, places=2)
+            self.assertAlmostEqual(
+                sf.info(ambient_stem).duration, 2.0, places=2
+            )
+            samples, rate = sf.read(output, always_2d=True)
+            self.assertEqual(rate, 44100)
+            self.assertGreater(np.mean(np.abs(samples[:, 0] - samples[:, 1])), 1e-4)
+            self.assertLessEqual(float(np.max(np.abs(samples))), 0.95)
+            spectrum = np.abs(np.fft.rfft(samples[:, 0]))
+            frequencies = np.fft.rfftfreq(len(samples), 1 / rate)
+            self.assertGreater(
+                spectrum[np.argmin(np.abs(frequencies - 90))], 10
+            )
+
+    def test_ambient_can_span_a_final_repeated_media_timeline(self):
+        ffmpeg = _find_ffmpeg_exe()
+        with tempfile.TemporaryDirectory() as root:
+            media = os.path.join(root, "looped.mp4")
+            ambience = os.path.join(root, "rain.wav")
+            output = os.path.join(root, "final.mp4")
+            extracted = os.path.join(root, "final.wav")
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "color=c=black:s=64x64:d=3",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+                "-shortest", "-c:v", "libx264", "-c:a", "aac", media,
+            ], check=True)
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i",
+                "sine=frequency=90:duration=0.8",
+                "-c:a", "pcm_s16le", ambience,
+            ], check=True)
+            mix_ambient_over_media(
+                ffmpeg, media, output, 3.0, {
+                    "ambient_master_db": -3.0,
+                    "true_peak_dbtp": -1.0,
+                    "ambient_tracks": [{
+                        "filepath": ambience, "enabled": True,
+                        "volume_db": -3.0, "pan": 0.0, "width": 1.0,
+                    }],
+                },
+            )
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-i", output, "-vn", "-c:a", "pcm_s16le", extracted,
+            ], check=True)
+            self.assertAlmostEqual(sf.info(extracted).duration, 3.0, places=1)
+            samples, rate = sf.read(extracted, always_2d=True)
+            spectrum = np.abs(np.fft.rfft(samples[:, 0]))
+            frequencies = np.fft.rfftfreq(len(samples), 1 / rate)
+            self.assertGreater(
+                spectrum[np.argmin(np.abs(frequencies - 90))], 10
+            )
 
     def test_direct_ffmpeg_video_pipeline(self):
         ffmpeg = _find_ffmpeg_exe()

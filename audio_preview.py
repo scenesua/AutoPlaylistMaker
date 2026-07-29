@@ -5,13 +5,19 @@ import subprocess
 import sys
 import tempfile
 import threading
+import logging
+from i18n import t
+from ffmpeg_service import resolve_ffmpeg_executable
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+logger = logging.getLogger(__name__)
 
 
 class AudioPreviewPlayer:
-    def __init__(self, ffmpeg_finder):
-        self._ffmpeg_finder = ffmpeg_finder
+    def __init__(self, ffmpeg_finder=None):
+        self._ffmpeg_finder = (
+            ffmpeg_finder or resolve_ffmpeg_executable
+        )
         self._generation = 0
         self._temp_path = None
 
@@ -27,7 +33,7 @@ class AudioPreviewPlayer:
             try:
                 ffmpeg = self._ffmpeg_finder()
                 if not ffmpeg:
-                    raise RuntimeError("미리듣기에 필요한 ffmpeg를 찾을 수 없습니다.")
+                    raise RuntimeError(t("player.ffmpegNotFound"))
                 fd, wav_path = tempfile.mkstemp(prefix="apm_preview_", suffix=".wav")
                 os.close(fd)
                 command = [
@@ -48,13 +54,17 @@ class AudioPreviewPlayer:
                 command += ['-ac', '2', '-ar', '44100', wav_path]
                 result = subprocess.run(command, capture_output=True, text=True, creationflags=_NO_WINDOW)
                 if result.returncode:
-                    raise RuntimeError(result.stderr.strip() or "미리듣기 변환 실패")
+                    logger.error(
+                        "Preview FFmpeg command failed: command=%r stderr=%s",
+                        command, result.stderr,
+                    )
+                    raise RuntimeError(result.stderr.strip() or t("player.convertFailed"))
                 if generation != self._generation:
                     os.unlink(wav_path)
                     return
                 self._temp_path = wav_path
                 if os.name != 'nt':
-                    raise RuntimeError("현재 미리듣기는 Windows 환경을 지원합니다.")
+                    raise RuntimeError(t("player.windowsOnly"))
                 import winsound
                 winsound.PlaySound(
                     wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC
@@ -62,6 +72,11 @@ class AudioPreviewPlayer:
                 if on_ready:
                     on_ready()
             except Exception as exc:
+                logger.error(
+                    "Audio preview failed", exc_info=(
+                        type(exc), exc, exc.__traceback__
+                    )
+                )
                 if on_error:
                     on_error(exc)
 

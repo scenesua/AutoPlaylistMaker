@@ -2,6 +2,7 @@
 
 import tkinter as tk
 from tkinter import font as tkfont
+from i18n import t
 
 
 class SearchableFontComboBox(tk.Frame):
@@ -111,7 +112,7 @@ class SearchableFontComboBox(tk.Frame):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.preview = tk.Label(
             popup,
-            text="가나다 ABC 123",
+            text=t("font.preview"),
             anchor="w",
             bg=self.theme["bg_card"],
             fg=self.theme["fg_dim"],
@@ -179,7 +180,7 @@ class SearchableFontComboBox(tk.Frame):
         ]
         self.listbox.delete(0, tk.END)
         if not self._visible_fonts:
-            self.listbox.insert(tk.END, "검색 결과 없음")
+            self.listbox.insert(tk.END, t("font.noResults"))
             self.listbox.itemconfigure(0, foreground=self.theme["fg_dimmer"])
             return
         for name in self._visible_fonts:

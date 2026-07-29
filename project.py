@@ -8,11 +8,23 @@ import hashlib
 import tempfile
 import numpy as np
 from datetime import datetime
+from i18n import t, choice_id
 
 AUDIO_EXTS = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.aiff'}
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff'}
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'}
-PROJECT_FORMAT_VERSION = 3
+PROJECT_FORMAT_VERSION = 4
+CLIP_INTERVAL_CHOICES = {
+    "seconds": "clip.seconds",
+    "beat": "clip.beat",
+    "per_track": "clip.perTrack",
+}
+CLIP_SORT_CHOICES = {
+    "bpm": "clip.sortBpm",
+    "key": "clip.sortKey",
+    "camelot": "clip.sortCamelot",
+    "order": "clip.sortOrder",
+}
 
 
 def _safe_cache_name(filepath):
@@ -25,6 +37,14 @@ def _safe_cache_name(filepath):
 
 def _arr(x):
     return x if x is not None else np.array([])
+
+
+def _source_signature(filepath):
+    try:
+        stat = os.stat(filepath)
+        return stat.st_size, stat.st_mtime_ns
+    except OSError:
+        return None, None
 
 
 class Project:
@@ -102,7 +122,7 @@ class Project:
 
     def backup_files(self, filepaths):
         if not self.project_dir:
-            raise RuntimeError("프로젝트 폴더가 지정되지 않았습니다.")
+            raise RuntimeError(t("projectModule.noFolder"))
         backed_up = [
             dict(item) for item in self.all_files
             if item.get('original') and not os.path.exists(item['original'])
@@ -112,10 +132,17 @@ class Project:
             for item in self.all_files
             if item.get('original') and item.get('backup')
         }
+        seen_this_call = {}
         for fp in filepaths:
             if not os.path.exists(fp):
                 continue
             source = os.path.abspath(fp)
+            key = os.path.normcase(source)
+
+            if key in seen_this_call:
+                backed_up.append(seen_this_call[key])
+                continue
+
             ext = os.path.splitext(fp)[1].lower()
             if ext in AUDIO_EXTS:
                 dest_dir = os.path.join(self.project_dir, "audio")
@@ -126,9 +153,10 @@ class Project:
             else:
                 continue
 
-            old = previous.get(os.path.normcase(source))
+            old = previous.get(key)
             if old and os.path.isfile(old['backup']):
                 backed_up.append(old)
+                seen_this_call[key] = old
                 continue
 
             dest = os.path.join(dest_dir, os.path.basename(fp))
@@ -140,14 +168,16 @@ class Project:
 
             if not os.path.exists(dest) or not os.path.samefile(source, dest):
                 shutil.copy2(source, dest)
-            backed_up.append({
+            entry = {
                 'original': source,
                 'backup': dest,
                 'type': (
                     'audio' if ext in AUDIO_EXTS
                     else ('image' if ext in IMAGE_EXTS else 'video')
                 ),
-            })
+            }
+            backed_up.append(entry)
+            seen_this_call[key] = entry
 
         self.all_files = backed_up
         return backed_up
@@ -157,7 +187,7 @@ class Project:
         progress_callback=None,
     ):
         if not self.project_file or not self.project_dir:
-            raise RuntimeError("프로젝트가 생성되지 않았습니다. 먼저 새 프로젝트를 만드세요.")
+            raise RuntimeError(t("projectModule.noProject"))
 
         previous_data = {}
         if os.path.isfile(self.project_file):
@@ -201,7 +231,7 @@ class Project:
             items = [(fp, a) for fp, a in analyses.items() if a is not None]
             for i, (filepath, a) in enumerate(items):
                 if progress_callback:
-                    progress_callback(i, len(items), "분석 결과 저장 중...")
+                    progress_callback(i, len(items), t("projectModule.savingAnalyses"))
                 cache_name = _safe_cache_name(filepath)
                 npz_path = os.path.join(cache_dir, cache_name + ".npz")
                 np.savez_compressed(
@@ -214,15 +244,24 @@ class Project:
                     stft_times=_arr(a.stft_times),
                     waveform=_arr(a.waveform),
                 )
+                source_size, source_mtime = _source_signature(filepath)
                 data['track_analyses'][os.path.abspath(filepath)] = {
                     'filepath': a.filepath, 'filename': a.filename,
                     'bpm': round(a.bpm, 1), 'key': a.key, 'mode': a.mode,
                     'camelot': a.camelot, 'duration': round(a.duration, 2),
                     'sr': a.sr, 'hop_length': a.hop_length,
+                    'integrated_lufs': getattr(a, 'integrated_lufs', None),
+                    'true_peak_dbtp': getattr(a, 'true_peak_dbtp', None),
+                    'loudness_range': getattr(a, 'loudness_range', None),
+                    'sample_peak_dbfs': getattr(a, 'sample_peak_dbfs', None),
+                    'channels': getattr(a, 'channels', 1),
+                    'analysis_version': getattr(a, 'analysis_version', 1),
                     'cache_file': os.path.relpath(npz_path, self.project_dir),
+                    'source_size': source_size,
+                    'source_mtime_ns': source_mtime,
                 }
             if progress_callback:
-                progress_callback(len(items), len(items), "저장 마무리 중...")
+                progress_callback(len(items), len(items), t("projectModule.savingFinalize"))
 
         if video_groups is not None:
             data['video_groups'] = []
@@ -234,9 +273,17 @@ class Project:
                     'bg_image': vg.get('bg_image', ''),
                     'clip_enabled': vg.get('clip_enabled', False),
                     'clip_interval': vg.get('clip_interval', 1.0),
-                    'clip_interval_unit': vg.get('clip_interval_unit', '초'),
+                    'clip_interval_unit': choice_id(
+                        vg.get('clip_interval_unit', 'seconds'),
+                        CLIP_INTERVAL_CHOICES,
+                        'seconds',
+                    ),
                     'clip_random': vg.get('clip_random', False),
-                    'clip_random_base': vg.get('clip_random_base', 'BPM'),
+                    'clip_random_base': choice_id(
+                        vg.get('clip_random_base', 'bpm'),
+                        CLIP_SORT_CHOICES,
+                        'bpm',
+                    ),
                     'clips': [],
                     'design': vg.get('design', {}),
                     'settings': vg.get('settings', {}),
@@ -263,6 +310,19 @@ class Project:
                         td['mode'] = a.mode
                         td['camelot'] = a.camelot
                         td['duration'] = round(a.duration, 1)
+                        fp = track_info.get('filepath', '')
+                        if fp:
+                            absp = os.path.abspath(fp)
+                            if absp not in data['track_analyses']:
+                                data['track_analyses'][absp] = {
+                                    'filepath': fp, 'filename': track_info.get('filename', ''),
+                                    'bpm': round(a.bpm, 1), 'key': a.key, 'mode': a.mode,
+                                    'camelot': a.camelot, 'duration': round(a.duration, 2),
+                                }
+                    else:
+                        dur = track_info.get('duration')
+                        if dur is not None:
+                            td['duration'] = round(dur, 1)
                     group_data['tracks'].append(td)
                 for clip_info in vg.get('clips', []):
                     group_data['clips'].append({
@@ -297,7 +357,7 @@ class Project:
         elif os.path.isdir(project_path):
             project_file = os.path.join(project_path, "project.json")
         else:
-            raise FileNotFoundError(f"프로젝트를 찾을 수 없습니다: {project_path}")
+            raise FileNotFoundError(t("projectModule.notFound", path=project_path))
 
         with open(project_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -327,6 +387,23 @@ class Project:
         )
         self.track_analyses = data.get('track_analyses', {})
         for group in self.video_groups:
+            legacy_interval = {
+                '초': 'seconds', '박자': 'beat', '곡별': 'per_track',
+            }.get(group.get('clip_interval_unit'))
+            legacy_sort = {
+                'BPM': 'bpm', '키': 'key', '캄롯': 'camelot',
+                '캠롯': 'camelot', '곡 순서': 'order',
+            }.get(group.get('clip_random_base'))
+            group['clip_interval_unit'] = choice_id(
+                legacy_interval or group.get('clip_interval_unit', 'seconds'),
+                CLIP_INTERVAL_CHOICES,
+                'seconds',
+            )
+            group['clip_random_base'] = choice_id(
+                legacy_sort or group.get('clip_random_base', 'bpm'),
+                CLIP_SORT_CHOICES,
+                'bpm',
+            )
             for track in group.get('tracks', []):
                 path = self._resolve_path(track.get('filepath', ''))
                 if not os.path.isfile(path):
@@ -338,6 +415,25 @@ class Project:
             analysis = self.track_analyses.get(old_path)
             if analysis and resolved:
                 self.track_analyses[os.path.abspath(resolved)] = analysis
+
+        backup_to_original = {}
+        for item in self.all_files:
+            orig = item.get('original', '')
+            backup = item.get('backup', '')
+            if orig and backup:
+                backup_to_original[os.path.abspath(backup)] = os.path.abspath(orig)
+
+        for group in self.video_groups:
+            for track in group.get('tracks', []):
+                if 'analysis' not in track:
+                    a = self.get_analysis_for(track.get('filepath', ''))
+                    if not a:
+                        backup_abs = os.path.abspath(track.get('filepath', ''))
+                        orig_abs = backup_to_original.get(backup_abs)
+                        if orig_abs:
+                            a = self.get_analysis_for(orig_abs)
+                    if a:
+                        track['analysis'] = a
 
         return data
 
@@ -366,6 +462,18 @@ class Project:
         ad = self.track_analyses.get(norm) or self.track_analyses.get(filepath)
         if not ad:
             return None
+        if ad.get("analysis_version", 1) < 2:
+            return None
+        saved_size = ad.get("source_size")
+        saved_mtime = ad.get("source_mtime_ns")
+        if saved_size is not None and saved_mtime is not None:
+            current_size, current_mtime = _source_signature(filepath)
+            if (
+                current_size is not None
+                and (current_size, current_mtime)
+                != (saved_size, saved_mtime)
+            ):
+                return None
 
         arrays = {
             'energy_profile': np.array([]), 'beat_times': np.array([]),
@@ -383,11 +491,20 @@ class Project:
                             if k in npz:
                                 arrays[k] = npz[k]
                 except Exception as e:
-                    print(f"  분석 캐시 로드 실패({cache_path}): {e}")
+                    print(t("projectModule.analysisLoadFailed", path=cache_path, error=e))
         else:
             for k in arrays:
                 if k in ad:
                     arrays[k] = np.array(ad[k])
+        # Older/incomplete caches cannot drive the visualizer. Treat them as
+        # stale so the normal project-load analysis path rebuilds all shared
+        # waveform/FFT data instead of silently rendering no visualizer.
+        if (
+            arrays['stft_magnitudes'].size == 0
+            or arrays['stft_times'].size == 0
+            or arrays['waveform'].size == 0
+        ):
+            return None
 
         return TrackAnalysis(
             filepath=ad.get('filepath', filepath),
@@ -406,6 +523,12 @@ class Project:
             sr=ad.get('sr', 22050),
             hop_length=ad.get('hop_length', 512),
             waveform=arrays['waveform'],
+            integrated_lufs=ad.get('integrated_lufs'),
+            true_peak_dbtp=ad.get('true_peak_dbtp'),
+            loudness_range=ad.get('loudness_range'),
+            sample_peak_dbfs=ad.get('sample_peak_dbfs'),
+            channels=ad.get('channels', 1),
+            analysis_version=ad.get('analysis_version', 1),
         )
 
     def list_projects(self):

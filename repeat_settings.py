@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import math
+from i18n import t
 
 
 MODE_COUNT = "count"
@@ -57,10 +58,10 @@ def format_duration(seconds):
     minutes, secs = divmod(remainder, 60)
     parts = []
     if hours:
-        parts.append(f"{hours}시간")
+        parts.append(t("time.hours", count=hours))
     if minutes or hours:
-        parts.append(f"{minutes}분")
-    parts.append(f"{secs}초")
+        parts.append(t("time.minutes", count=minutes))
+    parts.append(t("time.seconds", count=secs))
     return " ".join(parts)
 
 

@@ -1,16 +1,60 @@
 """
-Auto Playlist Maker GUI v1.2.0 - Dark theme, D2Coding font, dark/light toggle
-4단계: 프로젝트+가져오기 → 자동분배 → 음악편집 → 영상편집+렌더링
+Auto Playlist Maker GUI v1.3.0 - Dark theme, D2Coding font, dark/light toggle
 """
 
 import os
 import sys
-import json
 import threading
 import time
-import shutil
-import copy
 import webbrowser
+import traceback
+import datetime
+import logging
+import subprocess
+import queue
+from logging.handlers import RotatingFileHandler
+
+_STARTUP_T0 = time.perf_counter()
+
+import i18n as _i18n_mod
+t = _i18n_mod.t
+
+_log_dir = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_logs")
+os.makedirs(_log_dir, exist_ok=True)
+_application_log = os.path.join(_log_dir, "application.log")
+if not logging.getLogger().handlers:
+    _handler = RotatingFileHandler(
+        _application_log, maxBytes=2_000_000, backupCount=3,
+        encoding="utf-8",
+    )
+    _handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    ))
+    logging.getLogger().addHandler(_handler)
+    logging.getLogger().setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def _startup_mark(stage):
+    logger.info("STARTUP %.3fs %s", time.perf_counter() - _STARTUP_T0, stage)
+
+_log_lock = threading.Lock()
+def _log_error(context, exc=None):
+    logger.error(context, exc_info=(
+        type(exc), exc, exc.__traceback__
+    ) if exc is not None else None)
+    try:
+        log_dir = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        with _log_lock:
+            with open(os.path.join(log_dir, "error.log"), "a", encoding="utf-8") as f:
+                f.write(f"\n[{datetime.datetime.now().isoformat()}] {context}\n")
+                if exc:
+                    f.write("".join(traceback.format_exception(
+                        type(exc), exc, exc.__traceback__
+                    )))
+    except Exception:
+        pass
 
 if sys.platform == "win32" and getattr(sys, "frozen", False):
     import subprocess as _sp
@@ -38,13 +82,14 @@ if sys.platform == "win32" and getattr(sys, "frozen", False):
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from tkinter import font as tkfont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from stage4_design_effects import Stage4DesignEffects
+from stage5_render import Stage5Render
+
 _loaded = False
 _analyze_track = None
-_create_mixed_audio = None
 _load_audio_pydub = None
 _generate_video = None
 _load_visual_config = None
@@ -57,7 +102,7 @@ _PIL_ImageTk = None
 _PIL_ImageDraw = None
 _PIL_ImageFont = None
 video_gen = None
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 DONATION_URL = "https://toon.at/donate/scenesua"
 
 
@@ -85,7 +130,7 @@ def apply_window_icon(window):
 
 
 def _load_heavy_modules():
-    global _loaded, _analyze_track, _create_mixed_audio, _load_audio_pydub
+    global _loaded, _analyze_track, _load_audio_pydub
     global _generate_video, _load_visual_config, _Project
     global _distribute_tracks, _get_distribution_summary
     global _np, _PIL_Image, _PIL_ImageTk, _PIL_ImageDraw, _PIL_ImageFont
@@ -93,7 +138,7 @@ def _load_heavy_modules():
     import numpy as _numpy
     from PIL import Image as PILImage, ImageTk as PILImageTk, ImageDraw as PILImageDraw, ImageFont as PILImageFont
     from analyzer import analyze_track as _at
-    from transition import create_mixed_audio as _cma, load_audio_pydub as _lap
+    from transition import load_audio_pydub as _lap
     import video_gen as _video_gen_mod
     from video_gen import generate_video as _gv, load_visual_config as _lvc
     from project import Project as _Proj
@@ -104,7 +149,6 @@ def _load_heavy_modules():
     _PIL_ImageDraw = PILImageDraw
     _PIL_ImageFont = PILImageFont
     _analyze_track = _at
-    _create_mixed_audio = _cma
     _load_audio_pydub = _lap
     _generate_video = _gv
     video_gen = _video_gen_mod
@@ -113,6 +157,34 @@ def _load_heavy_modules():
     _distribute_tracks = _dt
     _get_distribution_summary = _gs
     _loaded = True
+
+
+def _ensure_project_module():
+    global _Project
+    if _Project is None:
+        from project import Project
+        _Project = Project
+
+
+def _ensure_analysis_modules():
+    global _analyze_track, _load_audio_pydub, _np
+    if _analyze_track is None:
+        from analyzer import analyze_track
+        _analyze_track = analyze_track
+    if _load_audio_pydub is None:
+        from transition import load_audio_pydub
+        _load_audio_pydub = load_audio_pydub
+    if _np is None:
+        import numpy
+        _np = numpy
+
+
+def _ensure_distribution_modules():
+    global _distribute_tracks, _get_distribution_summary
+    if _distribute_tracks is None:
+        from distributor import distribute_tracks, get_distribution_summary
+        _distribute_tracks = distribute_tracks
+        _get_distribution_summary = get_distribution_summary
 
 AUDIO_EXTS = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.aiff'}
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff'}
@@ -131,58 +203,90 @@ for _fp in _FONT_SEARCH:
         FONT_PATH = _fp
         break
 
-FONT_FAMILY = "D2Coding" if FONT_PATH else "Segoe UI"
+FONT_FAMILY = "Noto Sans KR" if sys.platform == "win32" else "TkDefaultFont"
 
 DARK = {
-    'bg':        '#202225',
-    'bg_mid':    '#2f3136',
-    'bg_main':   '#36393f',
-    'bg_input':  '#40444b',
-    'bg_hover':  '#4f545c',
-    'bg_card':   '#2f3136',
-    'fg':        '#dcddde',
-    'fg_dim':    '#96989d',
-    'fg_dimmer': '#72767d',
-    'accent':    '#5865f2',
-    'accent_h':  '#4752c4',
-    'success':   '#57f287',
-    'danger':    '#ed4245',
-    'warning':   '#fee75c',
-    'scroll_bg': '#202225',
-    'scroll_fg': '#202225',
-    'select':    '#5865f2',
-    'tree_sel':  '#4752c4',
-    'border':    '#202225',
-    'wave_bg':   '#202225',
-    'wave_line': '#5865f2',
-    'wave_trim': '#57f287',
-    'separator': '#4f545c',
+    'bg':        '#0b0e14',
+    'bg_mid':    '#121721',
+    'bg_main':   '#0f141c',
+    'bg_input':  '#1b2330',
+    'bg_hover':  '#263142',
+    'bg_card':   '#151b25',
+    'fg':        '#f0f3f8',
+    'fg_dim':    '#aab4c3',
+    'fg_dimmer': '#6f7b8d',
+    'accent':    '#6c7cff',
+    'accent_h':  '#8190ff',
+    'success':   '#47c98b',
+    'danger':    '#f05d6f',
+    'warning':   '#e8b95a',
+    'scroll_bg': '#111721',
+    'scroll_fg': '#3a4658',
+    'select':    '#4354d8',
+    'tree_sel':  '#3446be',
+    'border':    '#283244',
+    'wave_bg':   '#0b0f16',
+    'wave_line': '#7c8cff',
+    'wave_trim': '#47c98b',
+    'separator': '#252f3e',
+    'border_strong': '#3a4659',
+    'pressed':    '#5362d6',
+    'disabled':   '#111721',
+    'button':     '#1b2330',
+    'slider_track': '#273244',
+    'slider_fill': '#6c7cff',
+    'slider_thumb': '#eef1ff',
+    'panel_sash': '#3a4659',
+    'media_audio': '#70c7f2',
+    'media_image': '#76d49b',
+    'timeline_lane': '#141b26',
+    'timeline_lane_alt': '#182130',
+    'timeline_grid': '#344054',
+    'timeline_grid_minor': '#222c3b',
+    'timeline_playhead': '#ffcc66',
+    'timeline_selection': '#8b9aff',
 }
 
 LIGHT = {
-    'bg':        '#f2f3f5',
-    'bg_mid':    '#e3e5e8',
-    'bg_main':   '#ffffff',
-    'bg_input':  '#ebedef',
-    'bg_hover':  '#d4d7dc',
-    'bg_card':   '#e3e5e8',
-    'fg':        '#060607',
-    'fg_dim':    '#4e5058',
-    'fg_dimmer': '#80848e',
-    'accent':    '#5865f2',
-    'accent_h':  '#4752c4',
-    'success':   '#248046',
-    'danger':    '#d83c3e',
-    'warning':   '#c9a600',
-    'scroll_bg': '#e3e5e8',
-    'scroll_fg': '#c4c9ce',
-    'select':    '#5865f2',
-    'tree_sel':  '#4752c4',
-    'border':    '#d4d7dc',
-    'wave_bg':   '#f2f3f5',
-    'wave_line': '#5865f2',
-    'wave_trim': '#248046',
-    'separator': '#d4d7dc',
+    'bg':        '#eef1f6',
+    'bg_mid':    '#ffffff',
+    'bg_main':   '#f5f7fa',
+    'bg_input':  '#ffffff',
+    'bg_hover':  '#e8ecf3',
+    'bg_card':   '#ffffff',
+    'fg':        '#172033',
+    'fg_dim':    '#566176',
+    'fg_dimmer': '#8490a3',
+    'accent':    '#5367e8',
+    'accent_h':  '#4055d5',
+    'success':   '#16865b',
+    'danger':    '#d84458',
+    'warning':   '#9d6b09',
+    'scroll_bg': '#edf0f5',
+    'scroll_fg': '#bcc4d1',
+    'select':    '#5367e8',
+    'tree_sel':  '#4055d5',
+    'border':    '#d7dde7',
+    'wave_bg':   '#edf1f6',
+    'wave_line': '#5367e8',
+    'wave_trim': '#16865b',
+    'separator': '#e1e5ec',
+    'border_strong': '#aeb8c7',
+    'pressed':    '#3448bd',
+    'disabled':   '#edf0f5',
+    'button':     '#eef1f6',
+    'slider_track': '#c7ceda',
+    'slider_fill': '#5367e8',
+    'slider_thumb': '#ffffff',
+    'panel_sash': '#aeb8c7',
+    'media_audio': '#087eae',
+    'media_image': '#237a45',
+    'timeline_lane': '#ffffff',
+    'timeline_lane_alt': '#f2f5f9',
+    'timeline_grid': '#b8c2d0',
+    'timeline_grid_minor': '#dfe4eb',
+    'timeline_playhead': '#b55400',
+    'timeline_selection': '#4055d5',
 }
 
 THEME = DARK
@@ -205,8 +309,8 @@ def _pil_font(size):
         try:
             from PIL import ImageFont
             return ImageFont.truetype(FONT_PATH, size)
-        except Exception:
-            pass
+        except Exception as error:
+            _log_error("Configured preview font could not be loaded", error)
     from PIL import ImageFont
     return ImageFont.load_default()
 
@@ -227,15 +331,23 @@ class TrackItem:
         self.effects = {}
         self.metadata = {}
         self.missing = not os.path.isfile(filepath)
+        self.status = "missing" if self.missing else "pending"
+        self.analysis_error = ""
 
     def analyze(self):
         if self.filetype != "audio": return
+        self.status = "analyzing"
+        self.analysis_error = ""
         try:
+            _ensure_analysis_modules()
             self.analysis = _analyze_track(self.filepath)
             self.duration = self.analysis.duration
             self.trim_end = self.duration
+            self.status = "completed"
         except Exception as e:
-            print(f"분석 실패: {self.filename} - {e}")
+            self.status = "failed"
+            self.analysis_error = str(e)
+            print(t("errors.analysisFailed", name=self.filename, error=e))
 
     def to_dict(self):
         return {
@@ -253,14 +365,14 @@ def populate_group_tabs(container, video_groups, current_idx, on_select):
         w.destroy()
     if len(video_groups) <= 1:
         return
-    styled_label(container, "영상:", size=9, color=THEME['fg_dim'],
+    styled_label(container, t("dist.groupList") + ":", size=9, color=THEME['fg_dim'],
                 bg=container.cget('bg')).pack(side=tk.LEFT, padx=(0, 6))
     for i, g in enumerate(video_groups):
         active = (i == current_idx)
         n = len(g.get('tracks', []))
         dur = g.get('total_duration', 0)
         btn = styled_button(
-            container, f"Mix {i+1} ({n}곡, {int(dur)}초)" if len(video_groups) <= 4 else f"Mix {i+1}",
+            container, t("dist.mixTab", num=i+1, tracks=n, seconds=int(dur)) if len(video_groups) <= 4 else f"Mix {i+1}",
             command=lambda ii=i: on_select(ii),
             style="primary" if active else "default",
             padx=10, pady=4,
@@ -272,30 +384,82 @@ def styled_button(parent, text, command=None, style="default", **kw):
     btn_bg = THEME['accent'] if style == "primary" else THEME['bg_input']
     btn_fg = "#ffffff" if style == "primary" else THEME['fg']
     if style == "danger":
-        btn_bg = THEME['danger']
-        btn_fg = "#ffffff"
+        btn_fg = THEME['danger']
+    elif style == "success":
+        btn_fg = THEME['success']
+    action_hover = (
+        THEME['danger'] if style == "danger"
+        else THEME['success'] if style == "success"
+        else THEME['accent_h'] if style == "primary"
+        else THEME['bg_hover']
+    )
     btn = tk.Button(
         parent, text=text, font=_font(10),
         bg=kw.get('bg', btn_bg), fg=kw.get('fg', btn_fg),
-        activebackground=THEME['accent_h'] if style == "primary" else THEME['bg_hover'],
-        activeforeground="#ffffff" if style == "primary" else THEME['fg'],
-        relief=tk.FLAT, padx=kw.get('padx', 12), pady=kw.get('pady', 4),
+        activebackground=action_hover,
+        activeforeground=(
+            "#ffffff" if style in {"primary", "danger", "success"}
+            else THEME['fg']
+        ),
+        disabledforeground=THEME['fg_dimmer'],
+        relief=tk.FLAT, padx=kw.get('padx', 12), pady=kw.get('pady', 6),
         command=command, cursor="hand2",
-        borderwidth=0, highlightthickness=0,
+        borderwidth=0, highlightthickness=1,
+        highlightbackground=(
+            THEME['accent'] if style == "primary" else THEME['border']
+        ),
+        highlightcolor=THEME['accent'],
+        takefocus=True,
     )
+
+    def paint(hovered=False):
+        if str(btn.cget("state")) == tk.DISABLED:
+            btn.configure(
+                bg=THEME['bg_input'], fg=THEME['fg_dimmer'],
+                highlightbackground=THEME['border'], cursor="",
+            )
+            return
+        normal = (
+            THEME['accent'] if style == "primary"
+            else THEME['bg_input']
+        )
+        normal_border = (
+            THEME['accent'] if style == "primary"
+            else THEME['danger'] if style == "danger"
+            else THEME['success'] if style == "success"
+            else THEME['border']
+        )
+        btn.configure(
+            bg=action_hover if hovered else normal,
+            fg=(
+                "#ffffff"
+                if hovered and style in {"danger", "success"}
+                else kw.get('fg', btn_fg)
+            ),
+            highlightbackground=action_hover if hovered else normal_border,
+            cursor="hand2",
+        )
+
+    btn.bind("<Enter>", lambda _event: paint(True), add="+")
+    btn.bind("<Leave>", lambda _event: paint(False), add="+")
+    btn.bind("<FocusIn>", lambda _event: btn.configure(highlightbackground=THEME['accent']), add="+")
+    btn.bind("<FocusOut>", lambda _event: paint(False), add="+")
+    btn._paint_state = paint
     return btn
 
 
+def set_button_state(button, state, **options):
+    """Update a styled button without losing its disabled/active feedback."""
+    button.configure(state=state, **options)
+    paint = getattr(button, "_paint_state", None)
+    if paint:
+        paint(False)
+
+
 def styled_entry(parent, textvariable=None, width=None, **kw):
-    ent = tk.Entry(
+    ent = ttk.Entry(
         parent, textvariable=textvariable, width=width,
-        font=_font(10),
-        bg=THEME['bg_input'], fg=THEME['fg'],
-        insertbackground=THEME['fg'],
-        selectbackground=THEME['accent'],
-        selectforeground="#ffffff",
-        relief=tk.FLAT, borderwidth=0, highlightthickness=1,
-        highlightbackground=THEME['border'], highlightcolor=THEME['accent'],
+        font=_font(10), style="APM.TEntry",
     )
     return ent
 
@@ -309,11 +473,14 @@ def styled_label(parent, text, size=10, bold=False, color=None, **kw):
 
 
 def styled_option_menu(parent, variable, options, **kw):
-    m = tk.OptionMenu(parent, variable, *options)
+    value = options[0] if options else ""
+    m = tk.OptionMenu(parent, variable, value, *options)
     m.configure(
-        font=_font(9), bg=THEME['bg_input'], fg=THEME['fg'],
+        font=_font(10), bg=THEME['bg_input'], fg=THEME['fg'],
         activebackground=THEME['bg_hover'], activeforeground=THEME['fg'],
-        highlightthickness=0, relief=tk.FLAT, borderwidth=0,
+        highlightthickness=1, highlightbackground=THEME['border'],
+        highlightcolor=THEME['accent'], relief=tk.FLAT, borderwidth=0,
+        padx=6, pady=3,
     )
     m["menu"].configure(
         bg=THEME['bg_input'], fg=THEME['fg'],
@@ -323,28 +490,148 @@ def styled_option_menu(parent, variable, options, **kw):
     return m
 
 
+def styled_choice_menu(parent, value_variable, choices, **kw):
+    """Option menu that stores stable IDs while displaying translated labels.
+
+    ``choices`` maps stable IDs to translation keys. Values restored from older
+    projects may be translated labels; those are migrated to IDs immediately.
+    """
+    normalized = _i18n_mod.choice_id(
+        value_variable.get(), choices, next(iter(choices), "")
+    )
+    if value_variable.get() != normalized:
+        value_variable.set(normalized)
+
+    labels = {choice_id: t(key) for choice_id, key in choices.items()}
+    display_variable = tk.StringVar(value=labels.get(normalized, normalized))
+    menu = styled_option_menu(parent, display_variable, list(labels.values()), **kw)
+    syncing = {"active": False}
+
+    def sync_from_value(*_):
+        if syncing["active"]:
+            return
+        syncing["active"] = True
+        try:
+            choice_id = _i18n_mod.choice_id(
+                value_variable.get(), choices, next(iter(choices), "")
+            )
+            if value_variable.get() != choice_id:
+                value_variable.set(choice_id)
+            display_variable.set(labels.get(choice_id, choice_id))
+        finally:
+            syncing["active"] = False
+
+    def sync_from_display(*_):
+        if syncing["active"]:
+            return
+        syncing["active"] = True
+        try:
+            selected = display_variable.get()
+            choice_id = next(
+                (item_id for item_id, label in labels.items()
+                 if label == selected),
+                next(iter(choices), ""),
+            )
+            value_variable.set(choice_id)
+        finally:
+            syncing["active"] = False
+
+    value_variable.trace_add("write", sync_from_value)
+    display_variable.trace_add("write", sync_from_display)
+    menu._choice_display_variable = display_variable
+    menu._choice_value_variable = value_variable
+    menu._choice_labels = labels
+    return menu
+
+
 def styled_checkbutton(parent, text, variable, **kw):
-    return tk.Checkbutton(
+    return ttk.Checkbutton(
         parent, text=text, variable=variable,
-        font=_font(10),
-        bg=kw.get('bg', THEME['bg_card']), fg=THEME['fg'],
-        activebackground=kw.get('bg', THEME['bg_card']),
-        activeforeground=THEME['fg'],
-        selectcolor=THEME['bg_input'],
-        highlightthickness=0, borderwidth=0,
+        style="APM.TCheckbutton", takefocus=True,
     )
 
 
 def styled_scale(parent, variable, fr, to, res, **kw):
-    return tk.Scale(
+    scale = tk.Scale(
         parent, variable=variable, from_=fr, to=to, resolution=res,
         orient=tk.HORIZONTAL,
         bg=kw.get('bg', THEME['bg_card']), fg=THEME['fg'],
-        troughcolor=THEME['bg_input'],
-        activebackground=THEME['accent'],
-        highlightthickness=0, sliderlength=16, length=140,
-        borderwidth=0, showvalue=True,
+        troughcolor=THEME['slider_track'],
+        activebackground=THEME['accent_h'],
+        highlightthickness=1, highlightbackground=THEME['border'],
+        highlightcolor=THEME['focus_ring'] if 'focus_ring' in THEME else THEME['accent'],
+        sliderlength=20, sliderrelief=tk.FLAT, width=10, length=150,
+        borderwidth=0, showvalue=True, takefocus=True,
     )
+    try:
+        scale._default_value = variable.get()
+    except tk.TclError:
+        scale._default_value = fr
+
+    def reset_default(_event=None):
+        variable.set(scale._default_value)
+        scale.event_generate("<ButtonRelease-1>")
+        return "break"
+
+    def maybe_reset(event):
+        if event.state & 0x0008:
+            return reset_default(event)
+        return None
+
+    scale.bind("<Button-1>", maybe_reset, add="+")
+    scale.bind("<Enter>", lambda _e: scale.configure(highlightbackground=THEME['accent']), add="+")
+    scale.bind("<Leave>", lambda _e: scale.configure(highlightbackground=THEME['border']), add="+")
+    _attach_tooltip(
+        scale, lambda: t("progressOverlay.sliderResetHint")
+    )
+    return scale
+
+
+def _attach_tooltip(widget, text_provider):
+    state = {"after": None, "window": None}
+
+    def hide(_event=None):
+        if state["after"]:
+            try:
+                widget.after_cancel(state["after"])
+            except tk.TclError:
+                pass
+            state["after"] = None
+        if state["window"]:
+            try:
+                state["window"].destroy()
+            except tk.TclError:
+                pass
+            state["window"] = None
+
+    def show():
+        state["after"] = None
+        if not widget.winfo_exists():
+            return
+        tip = tk.Toplevel(widget)
+        tip.overrideredirect(True)
+        tip.configure(
+            bg=THEME['bg_card'], highlightthickness=1,
+            highlightbackground=THEME['border_strong'],
+        )
+        tk.Label(
+            tip, text=text_provider(), font=_font(9),
+            bg=THEME['bg_card'], fg=THEME['fg'],
+            padx=9, pady=6,
+        ).pack()
+        tip.geometry(
+            f"+{widget.winfo_pointerx() + 12}+"
+            f"{widget.winfo_pointery() + 14}"
+        )
+        state["window"] = tip
+
+    def schedule(_event=None):
+        hide()
+        state["after"] = widget.after(550, show)
+
+    widget.bind("<Enter>", schedule, add="+")
+    widget.bind("<Leave>", hide, add="+")
+    widget.bind("<Destroy>", hide, add="+")
 
 
 def styled_listbox(parent, **kw):
@@ -356,6 +643,7 @@ def styled_listbox(parent, **kw):
         relief=tk.FLAT, activestyle="none", borderwidth=0,
         highlightthickness=1, highlightbackground=THEME['border'],
         highlightcolor=THEME['accent'],
+        selectborderwidth=0,
     )
     return lb
 
@@ -371,41 +659,410 @@ def styled_text(parent, **kw):
     )
 
 
+class TaskProgressOverlay:
+    """Shared modal progress card driven by real worker callbacks."""
+
+    def __init__(self, owner, title, cancellable=False, on_cancel=None):
+        self.owner = owner
+        self.root = owner.winfo_toplevel()
+        self.on_cancel = on_cancel
+        self.window = tk.Toplevel(self.root)
+        self.window.overrideredirect(True)
+        self.window.transient(self.root)
+        self.window.configure(
+            bg=THEME['bg_card'], highlightthickness=1,
+            highlightbackground=THEME['border_strong'],
+        )
+        self.window.geometry("460x224")
+        card = tk.Frame(self.window, bg=THEME['bg_card'], padx=24, pady=20)
+        card.pack(fill=tk.BOTH, expand=True)
+        styled_label(
+            card, title, size=15, bold=True, bg=THEME['bg_card']
+        ).pack(fill=tk.X)
+        self.stage_label = styled_label(
+            card, "", size=10, color=THEME['fg'], bg=THEME['bg_card']
+        )
+        self.stage_label.pack(fill=tk.X, pady=(14, 2))
+        self.detail_label = styled_label(
+            card, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card']
+        )
+        self.detail_label.pack(fill=tk.X)
+        self.count_label = styled_label(
+            card, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card']
+        )
+        self.count_label.pack(fill=tk.X, pady=(4, 8))
+        self.progress = ttk.Progressbar(
+            card, style="APM.Horizontal.TProgressbar",
+            orient=tk.HORIZONTAL, mode="determinate", maximum=100,
+        )
+        self.progress.pack(fill=tk.X)
+        self.cancel_btn = styled_button(
+            card, t("common.cancel"), self._cancel, "danger", padx=12
+        )
+        if cancellable:
+            self.cancel_btn.pack(anchor=tk.E, pady=(12, 0))
+        self._root_bind = self.root.bind(
+            "<Configure>", self._recenter, add="+"
+        )
+        self.window.protocol("WM_DELETE_WINDOW", self._cancel)
+        self._recenter()
+        self.window.lift()
+        self.window.grab_set()
+
+    def _recenter(self, _event=None):
+        if not self.window.winfo_exists():
+            return
+        self.root.update_idletasks()
+        width, height = 460, 224
+        x = self.root.winfo_rootx() + max(
+            0, (self.root.winfo_width() - width) // 2
+        )
+        y = self.root.winfo_rooty() + max(
+            0, (self.root.winfo_height() - height) // 2
+        )
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
+
+    def update(self, stage, detail="", current=0, total=0):
+        if not self.window.winfo_exists():
+            return
+        self.stage_label.configure(text=stage)
+        self.detail_label.configure(text=detail)
+        if total > 0:
+            percent = max(0, min(100, current / total * 100))
+            self.count_label.configure(
+                text=t(
+                    "progressOverlay.itemCount",
+                    current=current, total=total, percent=int(percent),
+                )
+            )
+            self.progress.configure(mode="determinate", value=percent)
+        else:
+            self.count_label.configure(text=t("progressOverlay.working"))
+            self.progress.configure(mode="indeterminate")
+            self.progress.start(12)
+
+    def _cancel(self):
+        if self.on_cancel:
+            self.on_cancel()
+            set_button_state(self.cancel_btn, tk.DISABLED)
+            self.detail_label.configure(
+                text=t("progressOverlay.cancelling")
+            )
+
+    def close(self):
+        if not self.window.winfo_exists():
+            return
+        self.progress.stop()
+        try:
+            self.window.grab_release()
+        except tk.TclError:
+            pass
+        if self._root_bind:
+            self.root.unbind("<Configure>", self._root_bind)
+        self.window.destroy()
+
+
 # ─── Stage 0: 프로젝트 + 파일 가져오기 ───
 
 class Stage0Project(tk.Frame):
+    _LANG_OPTIONS = (
+        ("ko-KR", "🇰🇷", "한국어"),
+        ("en-US", "🇺🇸", "English"),
+        ("ja-JP", "🇯🇵", "日本語"),
+        ("zh-CN", "🇨🇳", "简体中文"),
+        ("zh-TW", "🇹🇼", "繁體中文"),
+        ("es-ES", "🇪🇸", "Español"),
+        ("fr-FR", "🇫🇷", "Français"),
+        ("it-IT", "🇮🇹", "Italiano"),
+        ("de-DE", "🇩🇪", "Deutsch"),
+        ("ru-RU", "🇷🇺", "Русский"),
+        ("ar", "🇸🇦", "العربية"),
+    )
+
     def __init__(self, parent, app):
         super().__init__(parent, bg=THEME['bg_main'])
         self.app = app
+        self._lang_popup = None
+        self._analysis_cancel_event = threading.Event()
+        self._task_overlay = None
         self.build_ui()
 
-    def build_ui(self):
-        top = tk.Frame(self, bg=THEME['bg_main'])
-        top.pack(fill=tk.X, padx=24, pady=(16, 0))
+    def _build_lang_button(self):
+        header = tk.Frame(self, bg=THEME['bg_main'])
+        header.pack(fill=tk.X, padx=24, pady=(18, 10))
+        styled_label(
+            header, t("navigation.stage0"), size=20, bold=True,
+            bg=THEME['bg_main'],
+        ).pack(side=tk.LEFT)
+        self.lang_btn = styled_button(
+            header, t("lang.button"), self._toggle_lang_popup, padx=10,
+        )
+        self.lang_btn.pack(side=tk.RIGHT)
 
-        proj_frame = tk.LabelFrame(
-            top, text=" 프로젝트 ", font=_font(11, True),
-            bg=THEME['bg_card'], fg=THEME['fg_dim'],
-            padx=12, pady=10, borderwidth=0,
+    def _toggle_lang_popup(self):
+        if self._lang_popup and self._lang_popup.winfo_exists():
+            self._close_lang_popup()
+            return
+        self._open_lang_popup()
+
+    def _open_lang_popup(self):
+        root = self.winfo_toplevel()
+        self._close_lang_popup()
+        popup = tk.Toplevel(root, bg=THEME['bg_main'])
+        popup.overrideredirect(True)
+        popup.transient(root)
+        self._lang_popup = popup
+        self._pending_locale = _i18n_mod.get_instance().locale
+        self._lang_option_widgets = {}
+
+        popup_width, popup_height = 690, 540
+        root.update_idletasks()
+        x = root.winfo_rootx() + max(0, (root.winfo_width() - popup_width) // 2)
+        y = root.winfo_rooty() + max(0, (root.winfo_height() - popup_height) // 2)
+        x = min(max(8, x), popup.winfo_screenwidth() - popup_width - 8)
+        y = min(max(8, y), popup.winfo_screenheight() - popup_height - 48)
+        popup.geometry(f"{popup_width}x{popup_height}+{x}+{y}")
+
+        card = tk.Canvas(
+            popup, width=popup_width, height=popup_height,
+            bg=THEME['bg_main'], highlightthickness=0,
+        )
+        card.pack(fill=tk.BOTH, expand=True)
+        self._rounded_rect(
+            card, 8, 8, popup_width - 8, popup_height - 8, 24,
+            fill=THEME['bg_card'], outline=THEME['border'], width=2,
+            tags=("lang_card",),
+        )
+        card.create_text(
+            38, 34, text="🌐 " + t("lang.selectTitle"), anchor=tk.NW,
+            fill=THEME['fg'], font=_font(18, True),
+        )
+        card.create_text(
+            38, 72, text=t("lang.description"), anchor=tk.NW,
+            fill=THEME['fg_dim'], font=_font(10),
+        )
+        close_id = card.create_text(
+            popup_width - 38, 34, text="×", anchor=tk.NE,
+            fill=THEME['fg_dim'], font=("Segoe UI", 20, "bold"),
+            tags=("lang_close",),
+        )
+        card.tag_bind(close_id, "<Button-1>", lambda _e: self._close_lang_popup())
+        card.tag_bind(close_id, "<Enter>", lambda _e: card.itemconfigure(close_id, fill=THEME['danger']))
+        card.tag_bind(close_id, "<Leave>", lambda _e: card.itemconfigure(close_id, fill=THEME['fg_dim']))
+
+        grid = tk.Frame(card, bg=THEME['bg_card'])
+        card.create_window(32, 112, window=grid, anchor=tk.NW, width=626, height=306)
+        for column in range(3):
+            grid.grid_columnconfigure(column, weight=1, uniform="language")
+        for index, (code, flag, native_name) in enumerate(self._LANG_OPTIONS):
+            widget = self._make_language_option(
+                grid, code, flag, native_name, index // 3, index % 3,
+            )
+            self._lang_option_widgets[code] = widget
+
+        actions = tk.Frame(card, bg=THEME['bg_card'])
+        card.create_window(340, 468, window=actions, anchor=tk.N, width=610, height=58)
+        cancel = self._make_rounded_action(
+            actions, t("common.cancel"), self._close_lang_popup,
+            normal="#d64550", hover="#ef5964",
+        )
+        cancel.pack(side=tk.LEFT, padx=(64, 12))
+        apply_button = self._make_rounded_action(
+            actions, t("common.apply"), self._apply_pending_language,
+            normal=THEME['accent'], hover=THEME['accent_h'],
+        )
+        apply_button.pack(side=tk.LEFT, padx=(12, 0))
+
+        popup.bind("<Escape>", lambda _e: self._close_lang_popup())
+        popup.protocol("WM_DELETE_WINDOW", self._close_lang_popup)
+        popup.update_idletasks()
+        popup.lift()
+        popup.grab_set()
+        popup.focus_force()
+        logger.debug("LANG popup visible at %s,%s size=%sx%s", x, y, popup_width, popup_height)
+
+    @staticmethod
+    def _rounded_rect(canvas, x1, y1, x2, y2, radius, **kwargs):
+        points = (
+            x1 + radius, y1, x2 - radius, y1, x2, y1,
+            x2, y1 + radius, x2, y2 - radius, x2, y2,
+            x2 - radius, y2, x1 + radius, y2, x1, y2,
+            x1, y2 - radius, x1, y1 + radius, x1, y1,
+        )
+        return canvas.create_polygon(points, smooth=True, splinesteps=24, **kwargs)
+
+    def _make_language_option(self, parent, code, flag, native_name, row, column):
+        canvas = tk.Canvas(
+            parent, width=192, height=62, bg=THEME['bg_card'],
+            highlightthickness=0, cursor="hand2",
+        )
+        canvas.grid(row=row, column=column, padx=7, pady=7, sticky="nsew")
+        canvas._language_code = code
+        canvas._selected = False
+        canvas._shape = self._rounded_rect(
+            canvas, 2, 2, 190, 60, 14,
+            fill=THEME['bg_input'], outline=THEME['border'], width=1,
+        )
+        self._draw_language_flag(canvas, code, 14, 22)
+        canvas._label = canvas.create_text(
+            52, 31, text=native_name, anchor=tk.W,
+            fill=THEME['fg'], font=("Segoe UI", 11),
+        )
+        canvas._check = canvas.create_text(
+            174, 31, text="", anchor=tk.CENTER,
+            fill="#ffffff", font=("Segoe UI", 11, "bold"),
+        )
+        canvas.bind("<Button-1>", lambda _e, c=code: self._choose_pending_language(c))
+        canvas.bind("<Enter>", lambda _e, w=canvas: self._paint_language_option(w, True))
+        canvas.bind("<Leave>", lambda _e, w=canvas: self._paint_language_option(w, False))
+        self._paint_language_option(
+            canvas, False, selected=(code == self._pending_locale)
+        )
+        return canvas
+
+    @staticmethod
+    def _draw_language_flag(canvas, code, x, y):
+        """Draw stable flag icons; Windows renders flag emoji as country letters."""
+        x2, y2 = x + 28, y + 18
+        canvas.create_rectangle(x, y, x2, y2, fill="#ffffff", outline="#74777d")
+        if code == "ko-KR":
+            canvas.create_oval(x + 9, y + 4, x + 19, y + 14, fill="#d94b55", outline="")
+            canvas.create_arc(x + 9, y + 4, x + 19, y + 14, start=180, extent=180,
+                              fill="#3158a5", outline="")
+        elif code == "en-US":
+            for stripe in range(0, 18, 4):
+                canvas.create_rectangle(x, y + stripe, x2, min(y2, y + stripe + 2),
+                                        fill="#d64b54", outline="")
+            canvas.create_rectangle(x, y, x + 12, y + 9, fill="#31558e", outline="")
+        elif code == "ja-JP":
+            canvas.create_oval(x + 9, y + 4, x + 19, y + 14, fill="#d93c4a", outline="")
+        elif code == "zh-CN":
+            canvas.create_rectangle(x, y, x2, y2, fill="#dc3545", outline="")
+            canvas.create_text(x + 7, y + 6, text="★", fill="#ffd84d", font=("Arial", 6))
+        elif code == "zh-TW":
+            canvas.create_rectangle(x, y, x2, y2, fill="#d93645", outline="")
+            canvas.create_rectangle(x, y, x + 13, y + 9, fill="#244b9b", outline="")
+            canvas.create_oval(x + 4, y + 2, x + 9, y + 7, fill="#ffffff", outline="")
+        elif code == "es-ES":
+            canvas.create_rectangle(x, y, x2, y + 4, fill="#c9363f", outline="")
+            canvas.create_rectangle(x, y + 4, x2, y + 14, fill="#f5c943", outline="")
+            canvas.create_rectangle(x, y + 14, x2, y2, fill="#c9363f", outline="")
+        elif code == "fr-FR":
+            canvas.create_rectangle(x, y, x + 9, y2, fill="#3156a3", outline="")
+            canvas.create_rectangle(x + 19, y, x2, y2, fill="#d7444e", outline="")
+        elif code == "it-IT":
+            canvas.create_rectangle(x, y, x + 9, y2, fill="#319065", outline="")
+            canvas.create_rectangle(x + 19, y, x2, y2, fill="#d7444e", outline="")
+        elif code == "de-DE":
+            canvas.create_rectangle(x, y, x2, y + 6, fill="#1b1b1b", outline="")
+            canvas.create_rectangle(x, y + 6, x2, y + 12, fill="#d7444e", outline="")
+            canvas.create_rectangle(x, y + 12, x2, y2, fill="#e8bd3f", outline="")
+        elif code == "ru-RU":
+            canvas.create_rectangle(x, y + 6, x2, y + 12, fill="#3156a3", outline="")
+            canvas.create_rectangle(x, y + 12, x2, y2, fill="#d7444e", outline="")
+        elif code == "ar":
+            canvas.create_rectangle(x, y, x2, y2, fill="#23824d", outline="")
+            canvas.create_line(x + 6, y + 12, x + 22, y + 12, fill="#ffffff", width=2)
+
+    def _paint_language_option(self, widget, hovered=False, selected=None):
+        if selected is not None:
+            widget._selected = selected
+        if widget._selected:
+            fill, outline, width, check = THEME['accent'], "#9aa7ff", 2, "✓"
+        elif hovered:
+            fill, outline, width, check = THEME['bg_hover'], THEME['accent'], 2, ""
+        else:
+            fill, outline, width, check = THEME['bg_input'], THEME['border'], 1, ""
+        widget.itemconfigure(widget._shape, fill=fill, outline=outline, width=width)
+        widget.itemconfigure(widget._check, text=check)
+
+    def _choose_pending_language(self, code):
+        if code not in _i18n_mod.SUPPORTED_LOCALES:
+            return
+        self._pending_locale = code
+        for locale, widget in self._lang_option_widgets.items():
+            self._paint_language_option(widget, selected=(locale == code))
+
+    def _make_rounded_action(self, parent, text, command, normal, hover):
+        canvas = tk.Canvas(
+            parent, width=220, height=48, bg=THEME['bg_card'],
+            highlightthickness=0, cursor="hand2",
+        )
+        shape = self._rounded_rect(
+            canvas, 2, 2, 218, 46, 13, fill=normal, outline=normal,
+        )
+        label = canvas.create_text(
+            110, 24, text=text, fill="#ffffff", font=_font(11, True),
+        )
+        for item in (canvas,):
+            item.bind("<Button-1>", lambda _e: command())
+            item.bind("<Enter>", lambda _e: canvas.itemconfigure(shape, fill=hover, outline=hover))
+            item.bind("<Leave>", lambda _e: canvas.itemconfigure(shape, fill=normal, outline=normal))
+        canvas._action_label = label
+        return canvas
+
+    def _apply_pending_language(self):
+        selected = getattr(self, "_pending_locale", _i18n_mod.get_instance().locale)
+        self._select_lang(selected)
+
+    def _close_lang_popup(self):
+        if self._lang_popup:
+            try:
+                if self._lang_popup.winfo_exists():
+                    try:
+                        self._lang_popup.grab_release()
+                    except tk.TclError:
+                        pass
+                    self._lang_popup.destroy()
+            except tk.TclError:
+                pass
+            self._lang_popup = None
+        if self.lang_btn.winfo_exists():
+            self.lang_btn.focus_set()
+
+    def _select_lang(self, code):
+        self._close_lang_popup()
+        if code == _i18n_mod.get_instance().locale:
+            return
+        app = self.app
+        _i18n_mod.get_instance().locale = code
+        self.lang_btn.configure(text=t("lang.button"))
+        app._on_language_changed()
+
+    def _apply_lang(self):
+        self.lang_btn.configure(text=t("lang.button"))
+
+    def build_ui(self):
+        self._build_lang_button()
+        top = tk.Frame(self, bg=THEME['bg_main'])
+        top.pack(fill=tk.X, padx=24)
+
+        proj_frame = tk.Frame(
+            top, bg=THEME['bg_card'],
+            padx=16, pady=14, borderwidth=0,
             highlightthickness=1, highlightbackground=THEME['border'],
         )
         proj_frame.pack(fill=tk.X)
+        styled_label(
+            proj_frame, t("project.title"), size=11, bold=True,
+            bg=THEME['bg_card'],
+        ).pack(fill=tk.X, anchor=tk.W, pady=(0, 10))
 
         row1 = tk.Frame(proj_frame, bg=THEME['bg_card'])
         row1.pack(fill=tk.X, pady=2)
-        styled_label(row1, "이름:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        self.proj_name_var = tk.StringVar(value="my_mix")
-        styled_entry(row1, textvariable=self.proj_name_var, width=25).pack(side=tk.LEFT, padx=6)
-        styled_button(row1, "새 프로젝트", self.new_project, "primary", padx=10).pack(side=tk.LEFT, padx=4)
-        styled_button(row1, "불러오기", self.load_project, padx=10).pack(side=tk.LEFT, padx=2)
-        styled_button(row1, "누락 파일 재연결", self.relink_missing_files, padx=10).pack(side=tk.LEFT, padx=2)
-        self.save_btn = styled_button(row1, "저장", self.save_project, padx=10)
+        styled_label(row1, t("project.nameLabel"), size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        self.proj_name_var = tk.StringVar(value=t("project.namePlaceholder"))
+        styled_entry(row1, textvariable=self.proj_name_var, width=25).pack(side=tk.LEFT, padx=8)
+        styled_button(row1, t("project.new"), self.new_project, padx=10).pack(side=tk.LEFT, padx=4)
+        styled_button(row1, t("project.load"), self.load_project, padx=10).pack(side=tk.LEFT, padx=2)
+        styled_button(row1, t("project.relink"), self.relink_missing_files, padx=10).pack(side=tk.LEFT, padx=2)
+        self.save_btn = styled_button(row1, t("common.save"), self.save_project, padx=10)
         self.save_btn.pack(side=tk.LEFT, padx=2)
         self.proj_status = styled_label(row1, "", size=9, color=THEME['success'], bg=THEME['bg_card'])
         self.proj_status.pack(side=tk.RIGHT)
         self.donation_btn = tk.Button(
             row1,
-            text="☕  후원 링크",
+            text=t("project.donation"),
             command=self._open_donation_link,
             font=_font(9),
             bg=THEME['bg_card'],
@@ -423,89 +1080,82 @@ class Stage0Project(tk.Frame):
 
         row_path = tk.Frame(proj_frame, bg=THEME['bg_card'])
         row_path.pack(fill=tk.X, pady=(6, 2))
-        styled_label(row_path, "저장 경로:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        self.proj_path_var = tk.StringVar(value=os.path.abspath("projects"))
+        styled_label(row_path, t("project.pathLabel"), size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        self.proj_path_var = tk.StringVar(value=os.path.abspath(t("project.pathPlaceholder")))
         styled_entry(row_path, textvariable=self.proj_path_var, width=40).pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
-        styled_button(row_path, "찾기", self._pick_proj_path, padx=8).pack(side=tk.LEFT)
+        styled_button(row_path, t("common.browse"), self._pick_proj_path, padx=8).pack(side=tk.LEFT)
 
         row2 = tk.Frame(proj_frame, bg=THEME['bg_card'])
         row2.pack(fill=tk.X, pady=(6, 2))
-        styled_label(row2, "목표 영상 길이:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_label(row2, t("project.targetDuration"), size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
         self.target_h_var = tk.StringVar(value="1")
         self.target_m_var = tk.StringVar(value="0")
         self.tolerance_var = tk.StringVar(value="10")
         styled_entry(row2, textvariable=self.target_h_var, width=3).pack(side=tk.LEFT, padx=2)
-        styled_label(row2, "시간", size=10, color=THEME['fg_dim'], bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_label(row2, t("project.hoursUnit"), size=10, color=THEME['fg_dim'], bg=THEME['bg_card']).pack(side=tk.LEFT)
         styled_entry(row2, textvariable=self.target_m_var, width=3).pack(side=tk.LEFT, padx=2)
-        styled_label(row2, "분", size=10, color=THEME['fg_dim'], bg=THEME['bg_card']).pack(side=tk.LEFT, padx=(0, 12))
-        styled_label(row2, "오차 범위:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_label(row2, t("project.minUnit"), size=10, color=THEME['fg_dim'], bg=THEME['bg_card']).pack(side=tk.LEFT, padx=(0, 12))
+        styled_label(row2, t("project.tolerance"), size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
         styled_entry(row2, textvariable=self.tolerance_var, width=3).pack(side=tk.LEFT, padx=2)
-        styled_label(row2, "%", size=10, color=THEME['fg_dim'], bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_label(row2, "  (±10%이면 1시간 영상은 54~66분)", size=9, color=THEME['fg_dimmer'], bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_label(row2, t("project.toleranceUnit"), size=10, color=THEME['fg_dim'], bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_label(row2, t("project.toleranceHelp"), size=9, color=THEME['fg_dimmer'], bg=THEME['bg_card']).pack(side=tk.LEFT)
 
         drop_frame = tk.Frame(self, bg=THEME['bg_main'])
-        drop_frame.pack(fill=tk.X, padx=24, pady=(12, 0))
+        drop_frame.pack(fill=tk.X, padx=24, pady=(16, 0))
         self.drop_area = tk.Frame(
             drop_frame, bg=THEME['bg_card'],
             highlightbackground=THEME['border'],
-            highlightthickness=2, highlightcolor=THEME['accent'],
+            highlightthickness=1, highlightcolor=THEME['accent'],
         )
-        self.drop_area.pack(fill=tk.X, ipady=30)
-        styled_label(self.drop_area, "+", size=40, color=THEME['fg_dimmer'], bg=THEME['bg_card']).pack()
-        styled_label(self.drop_area, "음악/이미지 파일을 여기에 드래그 앤 드롭",
+        self.drop_area.pack(fill=tk.X, ipady=26)
+        styled_label(self.drop_area, "+", size=28, color=THEME['accent'], bg=THEME['bg_card']).pack()
+        styled_label(self.drop_area, t("project.dropHint"),
                      size=12, color=THEME['fg_dim'], bg=THEME['bg_card']).pack()
-        styled_label(self.drop_area, "MP3, WAV, FLAC, JPG, PNG 등  |  음악+사진 혼합 가능",
+        styled_label(self.drop_area, t("project.dropFormats"),
                      size=9, color=THEME['fg_dimmer'], bg=THEME['bg_card']).pack(pady=(2, 0))
 
         btn_frame = tk.Frame(self, bg=THEME['bg_main'])
         btn_frame.pack(fill=tk.X, padx=24, pady=(10, 0))
-        styled_button(btn_frame, "파일 선택...", self.browse_files, padx=14).pack(side=tk.LEFT)
-        styled_button(btn_frame, "전체 삭제", self.clear_files, "danger", padx=14).pack(side=tk.LEFT, padx=6)
-        self.analyze_btn = styled_button(btn_frame, "분석 시작", self.start_analysis, "primary", padx=20, fg="#ffffff")
+        styled_button(btn_frame, t("project.browseFiles"), self.browse_files, padx=14).pack(side=tk.LEFT)
+        styled_button(
+            btn_frame, t("project.clearAll"), self.clear_files,
+            padx=14, fg=THEME['danger'],
+        ).pack(side=tk.LEFT, padx=6)
+        self.analyze_btn = styled_button(btn_frame, t("project.analyze"), self.start_analysis, "primary", padx=20, fg="#ffffff")
         self.analyze_btn.pack(side=tk.RIGHT)
         self.status_label = styled_label(btn_frame, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_main'])
         self.status_label.pack(side=tk.RIGHT, padx=(0, 12))
 
         list_frame = tk.Frame(self, bg=THEME['bg_card'])
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=(10, 16))
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=(12, 20))
         cols = ("name", "type", "duration", "bpm", "key", "camelot")
         self.tree = ttk.Treeview(list_frame, columns=cols, show="headings", selectmode="extended", height=10)
-        for c, t, w in [("name", "파일명", 260), ("type", "유형", 65), ("duration", "길이", 75),
-                         ("bpm", "BPM", 65), ("key", "키", 95), ("camelot", "캠롯", 65)]:
-            self.tree.heading(c, text=t)
+        for c, h, w in [("name", t("table.fileName"), 260), ("type", t("table.type"), 65), ("duration", t("table.duration"), 75),
+                         ("bpm", t("table.bpm"), 65), ("key", t("table.key"), 95), ("camelot", t("table.camelot"), 65)]:
+            self.tree.heading(c, text=h)
             self.tree.column(c, width=w, minwidth=40)
-
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Treeview",
-                         background=THEME['bg_input'], foreground=THEME['fg'],
-                         fieldbackground=THEME['bg_input'],
-                         font=_font(10), rowheight=28, borderwidth=0)
-        style.configure("Treeview.Heading",
-                         background=THEME['bg_mid'], foreground=THEME['fg'],
-                         font=_font(10, True), borderwidth=0, relief=tk.FLAT)
-        style.map("Treeview",
-                   background=[("selected", THEME['tree_sel'])],
-                   foreground=[("selected", "#ffffff")])
-        style.configure("Treeview", bordercolor=THEME['border'])
 
         sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
-        self.tree.tag_configure("audio", foreground="#7ec8e3")
-        self.tree.tag_configure("image", foreground="#a8d8a8")
+        self.tree.tag_configure(
+            "audio", foreground=THEME['media_audio']
+        )
+        self.tree.tag_configure(
+            "image", foreground=THEME['media_image']
+        )
 
         self._setup_dnd()
 
     def _open_donation_link(self):
         try:
             if not webbrowser.open_new_tab(DONATION_URL):
-                raise RuntimeError("기본 브라우저를 열 수 없습니다.")
+                raise RuntimeError(t("errors.cannotOpenBrowser"))
         except Exception as exc:
             messagebox.showerror(
-                "후원 링크",
-                f"후원 링크를 열지 못했습니다.\n\n{DONATION_URL}\n\n{exc}",
+                t("project.donationTitle"),
+                t("errors.failedToOpenDonation", url=DONATION_URL, error=exc),
                 parent=self,
             )
 
@@ -516,27 +1166,27 @@ class Stage0Project(tk.Frame):
             self.drop_area.dnd_bind('<<Drop>>', self._on_drop)
             self.drop_area.dnd_bind('<<DropEnter>>', lambda e: self.drop_area.configure(highlightbackground=THEME['accent']))
             self.drop_area.dnd_bind('<<DropLeave>>', lambda e: self.drop_area.configure(highlightbackground=THEME['border']))
-        except Exception:
-            pass
+        except Exception as error:
+            logger.info("Drag-and-drop unavailable: %s", error)
         for w in [self.drop_area] + self.drop_area.winfo_children():
             try:
                 w.bind("<Button-1>", lambda e: self.browse_files())
-            except:
-                pass
+            except tk.TclError as error:
+                logger.debug("Could not bind drop-area child: %s", error)
 
     def _on_drop(self, event):
         self.drop_area.configure(highlightbackground=THEME['border'])
         try:
             self.add_files(self.tk.splitlist(event.data))
-        except Exception:
+        except (AttributeError, tk.TclError, ValueError):
             try:
                 self.add_files([event.data])
-            except:
-                pass
+            except Exception as error:
+                logger.warning("Dropped files could not be added: %s", error)
 
     def browse_files(self):
         exts = " ".join(f"*{e}" for e in AUDIO_EXTS | IMAGE_EXTS)
-        files = filedialog.askopenfilenames(filetypes=[("파일", exts)])
+        files = filedialog.askopenfilenames(filetypes=[(t("common.fileType"), exts)])
         if files: self.add_files(files)
 
     def add_files(self, filepaths):
@@ -552,7 +1202,7 @@ class Stage0Project(tk.Frame):
             tag = item.filetype if item.filetype in ("audio", "image") else "unknown"
             self.tree.insert("", tk.END, iid=str(id(item)),
                              values=(item.filename, tag.upper(), "-", "-", "-", "-"), tags=(tag,))
-        self.status_label.configure(text=f"{len(self.app.tracks)}개 파일 ({added}개 추가)")
+        self.status_label.configure(text=t("project.filesStatus", total=len(self.app.tracks), added=added))
 
     def add_missing_file(self, filepath, file_kind=None):
         if any(t.filepath == filepath for t in self.app.tracks):
@@ -566,7 +1216,7 @@ class Stage0Project(tk.Frame):
             "", tk.END, iid=str(id(item)),
             values=(
                 item.filename or os.path.basename(filepath),
-                item.filetype.upper(), "누락", "-", "-", "-"
+                item.filetype.upper(), t("table.missing"), "-", "-", "-"
             ),
             tags=("missing",),
         )
@@ -580,47 +1230,130 @@ class Stage0Project(tk.Frame):
         self.status_label.configure(text="")
 
     def start_analysis(self):
-        audio = [t for t in self.app.tracks if t.filetype == "audio"]
+        audio = [
+            track for track in self.app.tracks
+            if track.filetype == "audio"
+        ]
         if not audio:
-            messagebox.showwarning("경고", "음악 파일을 추가하세요.")
+            messagebox.showwarning(t("common.warning"), t("project.addMusicFirst"))
             return
-        self.analyze_btn.configure(state=tk.DISABLED, text="분석 중...")
+        self._analysis_cancel_event = threading.Event()
+        self._task_overlay = TaskProgressOverlay(
+            self,
+            t("progressOverlay.analysisTitle"),
+            cancellable=True,
+            on_cancel=self._analysis_cancel_event.set,
+        )
+        self._task_overlay.update(
+            t("progressOverlay.checkingFiles"),
+            current=0, total=len(audio),
+        )
+        set_button_state(
+            self.analyze_btn, tk.DISABLED, text=t("project.analyzing")
+        )
 
         def run():
-            for i, t in enumerate(audio):
-                self.after(0, lambda tt=t, ii=i: self.status_label.configure(
-                    text=f"분석 중... [{ii+1}/{len(audio)}] {tt.filename}"))
-                t.analyze()
-                self.after(0, lambda tt=t: self._update_tree(tt))
-            self.after(0, self._done)
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _update_tree(self, t):
-        iid = str(id(t))
-        if not self.tree.exists(iid): return
-        if t.analysis:
-            a = t.analysis
-            m = "Maj" if a.mode == "major" else "Min"
-            d = f"{int(a.duration//60)}:{int(a.duration%60):02d}"
-            self.tree.item(iid, values=(t.filename, "AUDIO", d, f"{a.bpm:.0f}", f"{a.key} {m}", a.camelot))
-        else:
-            status = "누락" if getattr(t, 'missing', False) else "-"
-            self.tree.item(
-                iid,
-                values=(
-                    t.filename, t.filetype.upper(), status,
-                    "-", "-", "-",
-                ),
-                tags=("missing",) if getattr(t, 'missing', False) else (
-                    t.filetype,
+            failures = []
+            completed = 0
+            for i, track in enumerate(audio):
+                if self._analysis_cancel_event.is_set():
+                    break
+                self.after(
+                    0,
+                    lambda tt=track, ii=i: self._update_analysis_progress(
+                        tt, ii, len(audio)
+                    ),
+                )
+                track.analyze()
+                completed += 1
+                if not track.analysis:
+                    failures.append((track.filename, track.analysis_error))
+                self.after(
+                    0,
+                    lambda tt=track, done=completed: (
+                        self._update_tree(tt),
+                        self._task_overlay.update(
+                            t("progressOverlay.cacheReady"),
+                            tt.filename, done, len(audio),
+                        ) if self._task_overlay else None,
+                    ),
+                )
+            self.after(
+                0,
+                lambda: self._done(
+                    cancelled=self._analysis_cancel_event.is_set(),
+                    failures=failures,
                 ),
             )
 
-    def _done(self):
-        self.analyze_btn.configure(state=tk.NORMAL, text="분석 시작")
-        n = sum(1 for t in self.app.tracks if t.analysis)
-        self.status_label.configure(text=f"분석 완료: {n}곡")
+        threading.Thread(target=run, daemon=True).start()
+
+    def _update_analysis_progress(self, track, index, total):
+        self.status_label.configure(
+            text=t(
+                "project.analyzeProgress", current=index + 1,
+                total=total, filename=track.filename,
+            )
+        )
+        if self._task_overlay:
+            self._task_overlay.update(
+                t("progressOverlay.analyzingAudio"),
+                track.filename, index, total,
+            )
+
+    def _update_tree(self, track):
+        iid = str(id(track))
+        if not self.tree.exists(iid): return
+        if track.analysis:
+            a = track.analysis
+            m = "Maj" if a.mode == "major" else "Min"
+            d = f"{int(a.duration//60)}:{int(a.duration%60):02d}"
+            self.tree.item(iid, values=(track.filename, "AUDIO", d, f"{a.bpm:.0f}", f"{a.key} {m}", a.camelot))
+        else:
+            status_id = getattr(
+                track, "status",
+                "missing" if getattr(track, "missing", False) else "pending",
+            )
+            status = t(f"project.fileStatus.{status_id}")
+            self.tree.item(
+                iid,
+                values=(
+                    track.filename, track.filetype.upper(), status,
+                    "-", "-", "-",
+                ),
+                tags=("missing",) if getattr(track, 'missing', False) else (
+                    track.filetype,
+                ),
+            )
+
+    def _done(self, cancelled=False, failures=None):
+        if self._task_overlay:
+            self._task_overlay.close()
+            self._task_overlay = None
+        set_button_state(
+            self.analyze_btn, tk.NORMAL, text=t("project.analyze")
+        )
+        n = sum(1 for track in self.app.tracks if track.analysis)
+        if cancelled:
+            self.status_label.configure(
+                text=t("progressOverlay.cancelled")
+            )
+        else:
+            self.status_label.configure(
+                text=t("project.analyzeDone", count=n)
+            )
+        if failures:
+            detail = "\n".join(
+                f"{name}: {error}" for name, error in failures[:8]
+            )
+            messagebox.showwarning(
+                t("common.warning"),
+                t(
+                    "progressOverlay.partialFailure",
+                    count=len(failures), detail=detail,
+                ),
+                parent=self,
+            )
         if n > 0: self.app.enable_next(True)
 
     def get_target_seconds(self):
@@ -628,36 +1361,109 @@ class Stage0Project(tk.Frame):
             h = int(self.target_h_var.get() or 0)
             m = int(self.target_m_var.get() or 0)
             return h * 3600 + m * 60
-        except:
+        except (TypeError, ValueError, tk.TclError):
             return 3600
 
     def get_tolerance(self):
-        try: return float(self.tolerance_var.get()) / 100.0
-        except: return 0.10
+        try:
+            return float(self.tolerance_var.get()) / 100.0
+        except (TypeError, ValueError, tk.TclError):
+            return 0.10
 
     def _pick_proj_path(self):
-        path = filedialog.askdirectory(title="프로젝트 저장 폴더 선택")
+        path = filedialog.askdirectory(title=t("project.selectSaveFolder"))
         if path: self.proj_path_var.set(path)
 
     def new_project(self):
         name = self.proj_name_var.get().strip()
         if not name:
-            messagebox.showwarning("경고", "프로젝트 이름을 입력하세요.")
+            messagebox.showwarning(t("common.warning"), t("project.enterName"))
             return
-        base = self.proj_path_var.get().strip() or os.path.abspath("projects")
+        base = self.proj_path_var.get().strip() or os.path.abspath(t("project.pathPlaceholder"))
         self.app.project = _Project(base_dir=base)
         self.app.project.create(name)
-        self.proj_status.configure(text=f"프로젝트: {name}\n{self.app.project.project_dir}")
+        self.proj_status.configure(
+            text=t(
+                "project.created",
+                name=name,
+                path=self.app.project.project_dir,
+            )
+        )
 
     def load_project(self):
-        path = filedialog.askdirectory(title="프로젝트 폴더 선택")
-        if not path: return
+        path = filedialog.askdirectory(title=t("project.selectFolder"))
+        if not path:
+            return
+        overlay = TaskProgressOverlay(
+            self, t("progressOverlay.projectTitle")
+        )
+        self._task_overlay = overlay
+        overlay.update(t("progressOverlay.readingProject"))
+
+        def run():
+            try:
+                project = _Project()
+                data = project.load(path)
+                audio_files = [
+                    item.get("original", "")
+                    for item in project.all_files
+                    if item.get("type") == "audio"
+                ]
+                analyses = {
+                    os.path.abspath(track.get("filepath", "")):
+                    track["analysis"]
+                    for group in project.video_groups
+                    for track in group.get("tracks", [])
+                    if track.get("filepath") and track.get("analysis")
+                }
+                audio_total = len(audio_files)
+                for index, filepath in enumerate(audio_files):
+                    self.after(
+                        0,
+                        lambda fp=filepath, i=index, total=audio_total:
+                        overlay.update(
+                            t("progressOverlay.restoringCache"),
+                            os.path.basename(fp), i, total,
+                        ),
+                    )
+                    key = os.path.abspath(filepath)
+                    if key not in analyses:
+                        analysis = project.get_analysis_for(filepath)
+                        if analysis is None and os.path.isfile(filepath):
+                            analysis = _analyze_track(filepath)
+                        if analysis:
+                            analyses[key] = analysis
+                self.after(
+                    0,
+                    lambda: self._finish_project_load(
+                        project, data, analyses
+                    ),
+                )
+            except Exception as error:
+                self.after(
+                    0,
+                    lambda detail=str(error): self._fail_project_load(detail),
+                )
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _finish_project_load(self, project, data, analyses):
         try:
-            self.app.project = _Project()
-            data = self.app.project.load(path)
+            if self._task_overlay:
+                self._task_overlay.update(
+                    t("progressOverlay.restoringUi")
+                )
+            self.app.project = project
+            self.clear_files()
             self.proj_name_var.set(data.get('name', ''))
             self.proj_path_var.set(os.path.dirname(self.app.project.project_dir))
-            self.proj_status.configure(text=f"로드: {data.get('name','')}\n{self.app.project.project_dir}")
+            self.proj_status.configure(
+                text=t(
+                    "project.loaded",
+                    name=data.get('name', ''),
+                    path=self.app.project.project_dir,
+                )
+            )
             self.target_h_var.set(str(int(data.get('target_duration', 3600) // 3600)))
             self.target_m_var.set(str(int(data.get('target_duration', 3600) % 3600) // 60))
             self.tolerance_var.set(str(int(data.get('tolerance', 0.10) * 100)))
@@ -673,35 +1479,50 @@ class Stage0Project(tk.Frame):
                         filepath, file_info.get('type')
                     )
 
-            for t in self.app.tracks:
-                if t.filetype == "audio" and not t.analysis:
-                    a = self.app.project.get_analysis_for(t.filepath)
+            for track in self.app.tracks:
+                if track.filetype == "audio" and not track.analysis:
+                    a = analyses.get(os.path.abspath(track.filepath))
                     if a:
-                        t.analysis = a
-                        t.duration = a.duration
-                        t.trim_end = a.duration
-                        self._update_tree(t)
+                        track.analysis = a
+                        track.duration = a.duration
+                        track.trim_end = a.duration
+                        self._update_tree(track)
 
             self.app.video_groups = self.app.project.video_groups
 
             for vg in self.app.video_groups:
-                for t in vg.get('tracks', []):
-                    if not t.get('analysis'):
-                        fp = t.get('filepath', '')
+                for track_info in vg.get('tracks', []):
+                    if not track_info.get('analysis'):
+                        fp = track_info.get('filepath', '')
                         a = self.app.project.get_analysis_for(fp)
                         if a:
-                            t['analysis'] = a
-                            if not t.get('duration'):
-                                t['duration'] = a.duration
+                            track_info['analysis'] = a
+                            if not track_info.get('duration'):
+                                track_info['duration'] = a.duration
 
-            n = sum(1 for t in self.app.tracks if t.analysis)
-            self.status_label.configure(text=f"로드 완료: {n}곡 분석 결과 복원")
+            n = sum(
+                1 for track in self.app.tracks if track.analysis
+            )
+            self.status_label.configure(text=t("project.loadComplete", count=n))
             if n > 0:
                 self.app.enable_next(True)
             self.app.restore_project_state(self.app.project.app_state)
             self.app.set_dirty(False)
-        except Exception as e:
-            messagebox.showerror("오류", str(e))
+            if self._task_overlay:
+                self._task_overlay.close()
+                self._task_overlay = None
+        except Exception as error:
+            self._fail_project_load(str(error))
+
+    def _fail_project_load(self, detail):
+        if self._task_overlay:
+            self._task_overlay.close()
+            self._task_overlay = None
+        messagebox.showerror(
+            t("common.error"),
+            t("progressOverlay.projectFailed", error=detail),
+            parent=self,
+        )
 
     def save_project(self):
         if not self.app.project or not self.app.project.project_dir:
@@ -710,18 +1531,18 @@ class Stage0Project(tk.Frame):
                 from datetime import datetime
                 name = datetime.now().strftime("mix_%Y%m%d_%H%M%S")
                 self.proj_name_var.set(name)
-            base = self.proj_path_var.get().strip() or os.path.abspath("projects")
+            base = self.proj_path_var.get().strip() or os.path.abspath(t("project.pathPlaceholder"))
             self.app.project = _Project(base_dir=base)
             self.app.project.create(name)
-            self.proj_status.configure(text=f"프로젝트: {name}\n{self.app.project.project_dir}")
+            self.proj_status.configure(text=t("project.created", name=name, path=self.app.project.project_dir))
 
         self.app.project.target_duration = self.get_target_seconds()
         self.app.project.tolerance = self.get_tolerance()
 
         analyses = {}
-        for t in self.app.tracks:
-            if t.analysis:
-                analyses[t.filepath] = t.analysis
+        for track in self.app.tracks:
+            if track.analysis:
+                analyses[track.filepath] = track.analysis
         video_groups = []
         for group in self.app.video_groups:
             snapshot = dict(group)
@@ -732,7 +1553,9 @@ class Stage0Project(tk.Frame):
                 dict(clip) for clip in group.get('clips', [])
             ]
             video_groups.append(snapshot)
-        filepaths = [t.filepath for t in self.app.tracks]
+        filepaths = [
+            track.filepath for track in self.app.tracks
+        ]
         for group in video_groups:
             filepaths.extend(
                 clip.get('filepath', '')
@@ -752,10 +1575,10 @@ class Stage0Project(tk.Frame):
         self.app._project_save_generation += 1
 
         self.save_btn.configure(state=tk.DISABLED)
-        self.proj_status.configure(text="저장 중...")
+        self.proj_status.configure(text=t("project.saving"))
 
         def _on_progress(cur, total, msg):
-            self.after(0, lambda c=cur, t=total, m=msg: self.proj_status.configure(text=f"{m} {c}/{t}"))
+            self.after(0, lambda c=cur, tot=total, m=msg: self.proj_status.configure(text=t("project.saveProgress", msg=m, cur=c, total=tot)))
 
         def run():
             try:
@@ -768,14 +1591,18 @@ class Stage0Project(tk.Frame):
                         progress_callback=_on_progress,
                     )
                 self.after(0, lambda: (
-                    self.proj_status.configure(text="저장 완료!"),
+                    self.proj_status.configure(text=t("project.saved")),
                     self.save_btn.configure(state=tk.NORMAL),
                     self.app.set_dirty(False),
                 ))
-            except Exception as e:
-                self.after(0, lambda: (
-                    messagebox.showerror("오류", f"프로젝트 저장 실패:\n{e}"),
-                    self.proj_status.configure(text="저장 실패"),
+            except Exception as error:
+                error_text = str(error)
+                self.after(0, lambda detail=error_text: (
+                    messagebox.showerror(
+                        t("common.error"),
+                        t("project.saveError", error=detail),
+                    ),
+                    self.proj_status.configure(text=t("project.saveFailedStatus")),
                     self.save_btn.configure(state=tk.NORMAL),
                 ))
 
@@ -783,13 +1610,13 @@ class Stage0Project(tk.Frame):
 
     def relink_missing_files(self):
         if not self.app.project or not self.app.project.project_dir:
-            messagebox.showinfo("재연결", "먼저 프로젝트를 불러오세요.")
+            messagebox.showinfo(t("project.relinkInfo"), t("project.loadFirst"))
             return
         missing = self.app.project.missing_paths()
         if not missing:
-            messagebox.showinfo("재연결", "누락된 미디어 파일이 없습니다.")
+            messagebox.showinfo(t("project.relinkInfo"), t("project.noMissing"))
             return
-        search_dir = filedialog.askdirectory(title="누락 파일을 검색할 폴더 선택")
+        search_dir = filedialog.askdirectory(title=t("project.searchMissingFolder"))
         if not search_dir:
             return
         replacements = self.app.project.relink_missing(search_dir)
@@ -801,14 +1628,14 @@ class Stage0Project(tk.Frame):
                 self._update_tree(track)
         self.app.video_groups = self.app.project.video_groups
         self.proj_status.configure(
-            text=f"재연결 완료: {len(replacements)}/{len(missing)}개"
+            text=t("project.relinkComplete", count=len(replacements), total=len(missing))
         )
         if replacements:
             self.app.persist_video_groups()
         if len(replacements) < len(missing):
             messagebox.showwarning(
-                "일부 파일 누락",
-                f"{len(missing) - len(replacements)}개 파일을 찾지 못했습니다.",
+                t("project.someMissing"),
+                t("project.filesNotFound", count=len(missing) - len(replacements)),
             )
 
 
@@ -826,14 +1653,15 @@ class Stage1Distribute(tk.Frame):
     def build_ui(self):
         hdr = tk.Frame(self, bg=THEME['bg_main'])
         hdr.pack(fill=tk.X, padx=24, pady=(14, 0))
-        styled_label(hdr, "분배", size=20, bold=True, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_label(hdr, t("dist.title"), size=20, bold=True, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_button(hdr, t("common.save"), lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
 
         self._mode_btn_frame = tk.Frame(self, bg=THEME['bg_main'])
         self._mode_btn_frame.pack(fill=tk.X, padx=24, pady=(6, 2))
-        self.btn_auto = styled_button(self._mode_btn_frame, "자동 분배",
+        self.btn_auto = styled_button(self._mode_btn_frame, t("dist.auto"),
                                        lambda: self._set_mode("auto"), "primary", padx=14, pady=4)
         self.btn_auto.pack(side=tk.LEFT, padx=(0, 6))
-        self.btn_manual = styled_button(self._mode_btn_frame, "수동 분배",
+        self.btn_manual = styled_button(self._mode_btn_frame, t("dist.manual"),
                                          lambda: self._set_mode("manual"), padx=14, pady=4)
         self.btn_manual.pack(side=tk.LEFT)
 
@@ -853,13 +1681,13 @@ class Stage1Distribute(tk.Frame):
         if mode == "auto":
             self.btn_auto.configure(bg=THEME['accent'], fg="#ffffff")
             self.btn_manual.configure(bg=THEME['bg_input'], fg=THEME['fg'])
-            self.desc_label.configure(text="BPM/키 밸런스를 맞춰 여러 영상으로 자동 분할합니다")
+            self.desc_label.configure(text=t("dist.autoDesc"))
             self.manual_frame.pack_forget()
             self.auto_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 16))
         else:
             self.btn_manual.configure(bg=THEME['accent'], fg="#ffffff")
             self.btn_auto.configure(bg=THEME['bg_input'], fg=THEME['fg'])
-            self.desc_label.configure(text="곡을 드래그로 그룹에 배치하고 순서를 변경합니다")
+            self.desc_label.configure(text=t("dist.manualDesc"))
             self.auto_frame.pack_forget()
             self.manual_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 16))
             if self.manual_group_idx < 0 and self.app.video_groups:
@@ -869,14 +1697,19 @@ class Stage1Distribute(tk.Frame):
     def _build_auto_ui(self):
         ctrl = tk.Frame(self.auto_frame, bg=THEME['bg_main'])
         ctrl.pack(fill=tk.X, pady=(0, 8))
-        styled_button(ctrl, "자동 분배 실행", self.run_distribute, "primary", padx=18, pady=6).pack(side=tk.LEFT)
-        self.flow_preset_var = tk.StringVar(value="균형")
-        styled_option_menu(
-            ctrl, self.flow_preset_var, ["균형", "점진 상승", "차분함", "중반 피크"]
+        styled_button(ctrl, t("dist.autoRun"), self.run_distribute, "primary", padx=18, pady=6).pack(side=tk.LEFT)
+        self.flow_preset_var = tk.StringVar(value="balanced")
+        styled_choice_menu(
+            ctrl, self.flow_preset_var, {
+                "balanced": "dist.flowBalanced",
+                "build_up": "dist.flowBuildUp",
+                "calm": "dist.flowCalm",
+                "peak_middle": "dist.flowPeakMiddle",
+            }
         ).pack(side=tk.LEFT, padx=(8, 4))
         self.avoid_artist_var = tk.BooleanVar(value=True)
         styled_checkbutton(
-            ctrl, "같은 아티스트 연속 방지", self.avoid_artist_var,
+            ctrl, t("dist.noSameArtist"), self.avoid_artist_var,
             bg=THEME['bg_main'],
         ).pack(side=tk.LEFT, padx=4)
         self.dist_status = styled_label(ctrl, "", size=10, color=THEME['fg_dim'], bg=THEME['bg_main'])
@@ -887,7 +1720,7 @@ class Stage1Distribute(tk.Frame):
 
         left = tk.Frame(main, bg=THEME['bg_card'])
         main.add(left, width=350, minsize=250)
-        styled_label(left, "영상 그룹 목록", size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
+        styled_label(left, t("dist.groupList"), size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
         self.group_listbox = styled_listbox(left)
         self.group_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
         self.group_listbox.bind("<<ListboxSelect>>", self.on_select_group)
@@ -900,10 +1733,10 @@ class Stage1Distribute(tk.Frame):
     def _build_manual_ui(self):
         top = tk.Frame(self.manual_frame, bg=THEME['bg_main'])
         top.pack(fill=tk.X, pady=(0, 8))
-        styled_button(top, "그룹 추가", self._manual_add_group, padx=12, pady=4).pack(side=tk.LEFT, padx=(0, 6))
-        styled_button(top, "그룹 삭제", self._manual_del_group, "danger", padx=12, pady=4).pack(side=tk.LEFT, padx=(0, 6))
-        styled_button(top, "→ 선택 이동", self._manual_move_to_group, padx=12, pady=4).pack(side=tk.LEFT, padx=(0, 6))
-        styled_button(top, "← 선택 복귀", self._manual_move_from_group, padx=12, pady=4).pack(side=tk.LEFT)
+        styled_button(top, t("dist.groupAdd"), self._manual_add_group, "success", padx=12, pady=4).pack(side=tk.LEFT, padx=(0, 6))
+        styled_button(top, t("dist.groupDelete"), self._manual_del_group, "danger", padx=12, pady=4).pack(side=tk.LEFT, padx=(0, 6))
+        styled_button(top, t("dist.moveSelected"), self._manual_move_to_group, padx=12, pady=4).pack(side=tk.LEFT, padx=(0, 6))
+        styled_button(top, t("dist.moveBack"), self._manual_move_from_group, padx=12, pady=4).pack(side=tk.LEFT)
         self._manual_status = styled_label(top, "", size=10, color=THEME['fg_dim'], bg=THEME['bg_main'])
         self._manual_status.pack(side=tk.RIGHT, padx=8)
 
@@ -912,7 +1745,7 @@ class Stage1Distribute(tk.Frame):
 
         left = tk.Frame(body, bg=THEME['bg_card'])
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-        styled_label(left, "전체 곡  (드래그로 그룹에 이동)", size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
+        styled_label(left, t("dist.allTracks"), size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
         self._manual_track_list = tk.Listbox(left, selectmode=tk.EXTENDED,
                                              bg=THEME['bg_input'], fg=THEME['fg'],
                                              selectbackground=THEME['select'], selectforeground="#ffffff",
@@ -930,7 +1763,7 @@ class Stage1Distribute(tk.Frame):
         right = tk.Frame(body, bg=THEME['bg_card'])
         self._manual_group_panel = right
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
-        styled_label(right, "그룹 곡  (드래그로 순서 변경)", size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
+        styled_label(right, t("dist.groupTracks"), size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
         self._manual_group_tabs = tk.Frame(right, bg=THEME['bg_card'])
         self._manual_group_tabs.pack(fill=tk.X, padx=10)
         self._manual_group_list = tk.Listbox(right, selectmode=tk.SINGLE,
@@ -953,23 +1786,33 @@ class Stage1Distribute(tk.Frame):
         self._empty_group_drop_hint = None
 
     def _refresh_manual(self):
-        audio_tracks = [t for t in self.app.tracks if t.filetype == "audio" and t.analysis]
+        # Sync group track analysis with TrackItem to prevent stale display data
+        track_analysis_map = {tr.filepath: tr.analysis for tr in self.app.tracks if tr.analysis}
+        for g in self.app.video_groups:
+            for ti in g.get('tracks', []):
+                fp = ti.get('filepath', '')
+                if fp in track_analysis_map:
+                    ti['analysis'] = track_analysis_map[fp]
+
+        # Show all tracks (including assigned) so user can re-organize
+        all_tracks = [tr for tr in self.app.tracks if tr.filetype == "audio" and tr.analysis]
         assigned_fps = set()
         for g in self.app.video_groups:
             for ti in g.get('tracks', []):
                 assigned_fps.add(ti.get('filepath', ''))
-        unassigned = [t for t in audio_tracks if t.filepath not in assigned_fps]
 
         self._manual_track_list.delete(0, tk.END)
-        for i, t in enumerate(unassigned):
-            a = t.analysis
+        for i, tr in enumerate(all_tracks):
+            a = tr.analysis
             m = "Maj" if a.mode == "major" else "Min"
-            self._manual_track_list.insert(tk.END, f"{i+1}. {t.filename} [{a.bpm:.0f}BPM {a.key}{m}]")
-        self._manual_track_list._track_items = unassigned
+            prefix = "✓ " if tr.filepath in assigned_fps else "  "
+            self._manual_track_list.insert(tk.END, f"{prefix}{t('dist.trackInfo', num=i+1, filename=tr.filename, bpm=a.bpm, key=a.key, mode=m)}")
+        self._manual_track_list._track_items = all_tracks
 
         self._refresh_group_tabs()
         self._refresh_group_list()
-        self._manual_status.configure(text=f"미분배: {len(unassigned)}곡 | 그룹: {len(self.app.video_groups)}개")
+        unassigned_count = len(all_tracks) - len(assigned_fps)
+        self._manual_status.configure(text=t("dist.unassigned", count=unassigned_count, groups=len(self.app.video_groups)))
 
     def _refresh_group_tabs(self):
         for w in self._manual_group_tabs.winfo_children():
@@ -978,9 +1821,9 @@ class Stage1Distribute(tk.Frame):
             n = len(g.get('tracks', []))
             btn = styled_button(
                                 self._manual_group_tabs,
-                                f"{g.get('name') or f'Mix {i+1}'} ({n})",
+                                f"{g.get('name') or t('dist.tabMix', num=i+1)} ({n})",
                                 lambda idx=i: self._select_manual_group(idx),
-                                "primary" if i == self.manual_group_idx else "primary",
+                                "primary",
                                 padx=8, pady=2)
             btn.pack(side=tk.LEFT, padx=(0, 4))
             btn._group_index = i
@@ -1004,16 +1847,16 @@ class Stage1Distribute(tk.Frame):
             return
         g = self.app.video_groups[self.manual_group_idx]
         tracks = g.get('tracks', [])
-        for i, t in enumerate(tracks):
-            a = t.get('analysis')
+        for i, tr in enumerate(tracks):
+            a = tr.get('analysis')
             if a:
                 m = "Maj" if a.mode == "major" else "Min"
-                self._manual_group_list.insert(tk.END, f"{i+1}. {t.get('filename','')} [{a.bpm:.0f}BPM {a.key}{m}]")
+                self._manual_group_list.insert(tk.END, t("dist.trackInfo", num=i+1, filename=tr.get('filename',''), bpm=a.bpm, key=a.key, mode=m))
             else:
-                self._manual_group_list.insert(tk.END, f"{i+1}. {t.get('filename','')} (미분석)")
+                self._manual_group_list.insert(tk.END, f"{i+1}. {tr.get('filename','')} ({t('dist.noAnalysis')})")
         self._manual_group_list._group_items = tracks
         if not tracks:
-            self._manual_group_list.insert(tk.END, "여기에 놓기")
+            self._manual_group_list.insert(tk.END, t("dist.dropHere"))
             self._manual_group_list.itemconfigure(
                 0, foreground=THEME['fg_dimmer']
             )
@@ -1021,8 +1864,8 @@ class Stage1Distribute(tk.Frame):
 
     def _show_empty_group_hint(self, create_group):
         text = (
-            "새 그룹을 생성하여 여기에 이동"
-            if create_group else "여기에 놓기"
+            t("dist.dragCopyHint")
+            if create_group else t("dist.dropHere")
         )
         self._empty_group_drop_hint = tk.Label(
             self._manual_group_list,
@@ -1106,11 +1949,19 @@ class Stage1Distribute(tk.Frame):
         ]
         if not selected:
             return False
+
+        # Filter out tracks already assigned to any group
+        assigned_fps = set()
+        for g in self.app.video_groups:
+            for ti in g.get('tracks', []):
+                assigned_fps.add(ti.get('filepath', ''))
         payload = []
         try:
             for track in selected:
+                if track.filepath in assigned_fps:
+                    continue
                 if track.analysis is None or not track.filepath:
-                    raise ValueError("분석되지 않았거나 경로가 없는 곡입니다.")
+                    raise ValueError(t("dist.invalidTrack"))
                 payload.append({
                     'track': track,
                     'analysis': track.analysis,
@@ -1127,7 +1978,7 @@ class Stage1Distribute(tk.Frame):
                     'fade_out': getattr(track, 'fade_out', 0.01),
                 })
         except (AttributeError, TypeError, ValueError) as error:
-            messagebox.showerror("이동 실패", str(error))
+            messagebox.showerror(t("dist.moveError"), str(error))
             return False
 
         created_group = False
@@ -1244,7 +2095,7 @@ class Stage1Distribute(tk.Frame):
         first = sel[0]
         if first < len(items):
             name = items[first].filename
-            extra = f" 외 {len(sel)-1}곡" if len(sel) > 1 else ""
+            extra = t("dist.dragExtra", count=len(sel)-1) if len(sel) > 1 else ""
             self._show_drag_label(lb, f"{name}{extra}", event.x, event.y)
 
     def _track_list_release(self, event):
@@ -1381,7 +2232,7 @@ class Stage1Distribute(tk.Frame):
             name = dd['item'].get('filename', '')
             position = min(insert_at + 1, len(tracks))
             self._show_drag_label(
-                lb, f"{name}  →  {position}번 위치", event.x, event.y
+                lb, t("dist.dragPosition", name=name, position=position), event.x, event.y
             )
             lb.configure(cursor='fleur')
 
@@ -1415,14 +2266,14 @@ class Stage1Distribute(tk.Frame):
         insert_at = max(0, min(insert_at, len(target_tracks)))
         target_tracks.insert(insert_at, item)
         source['total_duration'] = sum(
-            max(0, t.get('trim_end', t.get('duration', 0))
-                - t.get('trim_start', 0))
-            for t in source_tracks
+            max(0, item.get('trim_end', item.get('duration', 0))
+                - item.get('trim_start', 0))
+            for item in source_tracks
         )
         target['total_duration'] = sum(
-            max(0, t.get('trim_end', t.get('duration', 0))
-                - t.get('trim_start', 0))
-            for t in target_tracks
+            max(0, item.get('trim_end', item.get('duration', 0))
+                - item.get('trim_start', 0))
+            for item in target_tracks
         )
         self._clear_group_drag()
         self._refresh_group_list()
@@ -1497,7 +2348,7 @@ class Stage1Distribute(tk.Frame):
             for i, g in enumerate(self.app.video_groups):
                 dur = g.get('total_duration', 0)
                 n = len(g.get('tracks', []))
-                self.group_listbox.insert(tk.END, f"Mix {i+1}: {n}곡, {int(dur)}초 ({int(dur//60)}분 {int(dur%60):02d}초)")
+                self.group_listbox.insert(tk.END, t("dist.groupEntry", num=i+1, count=n, seconds=int(dur), minutes=int(dur//60), secs=int(dur%60)))
             self._show_detail(None)
         else:
             self._refresh_manual()
@@ -1511,47 +2362,52 @@ class Stage1Distribute(tk.Frame):
         self.detail_text.configure(state=tk.NORMAL)
         self.detail_text.delete("1.0", tk.END)
         if idx is None or idx >= len(self.app.video_groups):
-            self.detail_text.insert("1.0", "그룹을 선택하세요")
+            self.detail_text.insert("1.0", t("dist.selectGroup"))
             self.detail_text.configure(state=tk.DISABLED)
             return
         g = self.app.video_groups[idx]
-        lines = [f"=== Mix {idx+1}: {g.get('name','')} ===",
-                 f"총 길이: {g.get('total_duration',0):.0f}초 "
-                 f"({int(g.get('total_duration',0)//60)}분 {int(g.get('total_duration',0)%60):02d}초)",
-                 f"곡 수: {len(g.get('tracks',[]))}", ""]
-        for j, t in enumerate(g.get('tracks', [])):
-            a = t.get('analysis')
+        lines = [t("dist.mixSummary", idx=idx+1, name=g.get('name','')),
+                 t("dist.totalDuration", duration=g.get('total_duration',0), minutes=int(g.get('total_duration',0)//60), seconds=int(g.get('total_duration',0)%60)),
+                 t("dist.trackCount", count=len(g.get('tracks',[]))), ""]
+        for j, tr in enumerate(g.get('tracks', [])):
+            a = tr.get('analysis')
             if a:
                 m = "Maj" if a.mode == "major" else "Min"
-                dur = t.get('duration', a.duration)
-                lines.append(f"  [{j+1}] {t.get('filename','')}")
-                lines.append(f"       {a.bpm:.0f} BPM | {a.key} {m} ({a.camelot}) | {dur:.0f}s")
+                dur = tr.get('duration', a.duration)
+                lines.append(t("dist.detailTrackNum", num=j+1, filename=tr.get('filename','')))
+                lines.append(t("dist.detailTrackAnalysis", bpm=a.bpm, key=a.key, mode=m, camelot=a.camelot, duration=dur))
             else:
-                lines.append(f"  [{j+1}] {t.get('filename','')} (미분석)")
+                lines.append(f"  [{j+1}] {tr.get('filename','')} ({t('dist.noAnalysis')})")
         self.detail_text.insert("1.0", "\n".join(lines))
         self.detail_text.configure(state=tk.DISABLED)
 
     def run_distribute(self):
-        audio_tracks = [t for t in self.app.tracks if t.filetype == "audio" and t.analysis]
+        audio_tracks = [tr for tr in self.app.tracks if tr.filetype == "audio" and tr.analysis]
         if not audio_tracks:
-            messagebox.showwarning("경고", "분석된 음악이 없습니다.")
+            messagebox.showwarning(t("common.warning"), t("dist.noAnalyzedTracks"))
             return
         target = self.app.stages[0].get_target_seconds()
         tol = self.app.stages[0].get_tolerance()
         n = len(audio_tracks)
-        self.dist_status.configure(text=f"분배 중... (0/{n}곡)")
-        preset_map = {
-            "균형": "balanced", "점진 상승": "build_up",
-            "차분함": "calm", "중반 피크": "peak_middle",
-        }
-        flow_preset = preset_map.get(self.flow_preset_var.get(), "balanced")
+        self.dist_status.configure(text=t("dist.distributing", count=0, total=n))
+        flow_preset = _i18n_mod.choice_id(
+            self.flow_preset_var.get(),
+            {
+                "balanced": "dist.flowBalanced",
+                "build_up": "dist.flowBuildUp",
+                "calm": "dist.flowCalm",
+                "peak_middle": "dist.flowPeakMiddle",
+            },
+            "balanced",
+        )
         avoid_same_artist = self.avoid_artist_var.get()
 
         def _on_progress(current, total, msg):
-            self.after(0, lambda c=current, t=total, m=msg: self.dist_status.configure(text=f"{m} {c+1}/{t}"))
+            self.after(0, lambda c=current, tt=total, m=msg: self.dist_status.configure(text=f"{m} {c+1}/{tt}"))
 
         def run():
             try:
+                _ensure_distribution_modules()
                 groups = _distribute_tracks(
                     audio_tracks, target, tol, progress_callback=_on_progress,
                     preset=flow_preset,
@@ -1564,14 +2420,14 @@ class Stage1Distribute(tk.Frame):
                 def _apply():
                     self.app.video_groups = groups
                     self.refresh()
-                    self.dist_status.configure(text=f"{len(groups)}개 영상 생성됨")
+                    self.dist_status.configure(text=t("dist.groupsCreated", count=len(groups)))
                     self.app.enable_next(bool(groups))
                     self.app.persist_video_groups()
                 self.after(0, _apply)
             except Exception as e:
                 def _show_error(error=e):
-                    self.dist_status.configure(text="분배 실패")
-                    messagebox.showerror("분배 오류", str(error))
+                    self.dist_status.configure(text=t("dist.distributeFailed"))
+                    messagebox.showerror(t("common.error"), str(error))
                 self.after(0, _show_error)
         threading.Thread(target=run, daemon=True).start()
 
@@ -1586,6 +2442,21 @@ def _fmt_ts(sec):
     m = int(sec) // 60
     s = int(sec) % 60
     return f"{m}:{s:02d}"
+
+
+def _waveform_peaks(samples, max_peaks=1200):
+    chunk = max(1, len(samples) // max_peaks)
+    usable = len(samples) - (len(samples) % chunk)
+    body = samples[:usable].reshape(-1, chunk)
+    peaks = list(zip(
+        body.min(axis=1).astype(float),
+        body.max(axis=1).astype(float),
+        strict=False,
+    ))
+    if usable < len(samples):
+        tail = samples[usable:]
+        peaks.append((float(tail.min()), float(tail.max())))
+    return peaks
 
 
 class Stage2MusicEdit(tk.Frame):
@@ -1614,8 +2485,8 @@ class Stage2MusicEdit(tk.Frame):
         self.build_ui()
 
     def build_ui(self):
-        styled_label(self, "음악 편집", size=20, bold=True, bg=THEME['bg_main']).pack(pady=(14, 2))
-        styled_label(self, "타임라인에서 트랙의 시작/끝을 드래그하면 뒤의 트랙이 자동으로 밀립니다",
+        styled_label(self, t("audio.title"), size=20, bold=True, bg=THEME['bg_main']).pack(pady=(14, 2))
+        styled_label(self, t("audio.helpTimeline"),
                      size=11, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(pady=(0, 6))
 
         top = tk.Frame(self, bg=THEME['bg_main'])
@@ -1623,15 +2494,26 @@ class Stage2MusicEdit(tk.Frame):
         self.tabs_container = tk.Frame(top, bg=THEME['bg_main'])
         self.tabs_container.pack(side=tk.LEFT)
 
-        styled_button(top, "줌 인", self._zoom_in, padx=6).pack(side=tk.RIGHT, padx=(4, 0))
-        styled_button(top, "줌 아웃", self._zoom_out, padx=6).pack(side=tk.RIGHT)
-        styled_button(top, "전체 보기", self._zoom_fit, padx=6).pack(side=tk.RIGHT, padx=(0, 4))
-        styled_button(top, "전체 초기화", self._reset_all, padx=6).pack(side=tk.RIGHT, padx=(0, 4))
+        styled_button(top, t("common.save"), lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
+        styled_button(top, t("audio.zoomIn"), self._zoom_in, padx=6).pack(side=tk.RIGHT, padx=(4, 0))
+        styled_button(top, t("audio.zoomOut"), self._zoom_out, padx=6).pack(side=tk.RIGHT)
+        styled_button(top, t("audio.fitAll"), self._zoom_fit, padx=6).pack(side=tk.RIGHT, padx=(0, 4))
+        styled_button(top, t("audio.resetAll"), self._reset_all, padx=6).pack(side=tk.RIGHT, padx=(0, 4))
 
         info_row = tk.Frame(self, bg=THEME['bg_main'])
         info_row.pack(fill=tk.X, padx=24, pady=(2, 2))
-        self.tl_info = styled_label(info_row, "그룹을 선택하세요", size=10, color=THEME['fg_dim'], bg=THEME['bg_main'])
+        self.tl_info = styled_label(info_row, t("audio.selectGroup"), size=10, color=THEME['fg_dim'], bg=THEME['bg_main'])
         self.tl_info.pack(side=tk.LEFT)
+        self.wave_progress_label = styled_label(
+            info_row, "", size=9, color=THEME['fg_dim'],
+            bg=THEME['bg_main'],
+        )
+        self.wave_progress_label.pack(side=tk.RIGHT)
+        self.wave_progress = ttk.Progressbar(
+            info_row, style="APM.Horizontal.TProgressbar",
+            orient=tk.HORIZONTAL, mode="determinate", maximum=100,
+            length=150,
+        )
 
         tl_frame = tk.Frame(self, bg=THEME['wave_bg'])
         tl_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 4))
@@ -1654,19 +2536,25 @@ class Stage2MusicEdit(tk.Frame):
 
         tf = tk.Frame(self, bg=THEME['bg_main'])
         tf.pack(fill=tk.X, padx=24, pady=(0, 8))
-        styled_label(tf, "가장자리: 트림 (기본 0.1초 / Shift 0.01초 / Alt 0.001초)  |  본문 드래그: 순서 변경",
+        styled_label(tf, t("audio.helpTrim"),
                      size=10, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(side=tk.LEFT)
 
         btn_row = tk.Frame(self, bg=THEME['bg_main'])
         btn_row.pack(fill=tk.X, padx=24, pady=(0, 10))
-        styled_button(btn_row, "▶ 선택 미리듣기", self._play_selection, "primary", padx=10).pack(side=tk.LEFT)
-        styled_button(btn_row, "■ 정지", self._stop_preview, padx=10).pack(side=tk.LEFT, padx=(4, 12))
-        styled_button(btn_row, "↶ 실행 취소", self._undo, padx=10).pack(side=tk.LEFT)
-        styled_button(btn_row, "↷ 다시 실행", self._redo, padx=10).pack(side=tk.LEFT, padx=4)
-        styled_button(btn_row, "▲ 순서 변경", self._move_up, padx=10).pack(side=tk.LEFT)
-        styled_button(btn_row, "▼ 순서 변경", self._move_down, padx=10).pack(side=tk.LEFT, padx=4)
-        self.bind_all("<Control-z>", lambda e: self._undo())
-        self.bind_all("<Control-y>", lambda e: self._redo())
+        styled_button(btn_row, t("audio.preview"), self._play_selection, "primary", padx=10).pack(side=tk.LEFT)
+        styled_button(btn_row, t("audio.stop"), self._stop_preview, padx=10).pack(side=tk.LEFT, padx=(4, 12))
+        styled_button(btn_row, t("audio.undo"), self._undo, padx=10).pack(side=tk.LEFT)
+        styled_button(btn_row, t("audio.redo"), self._redo, padx=10).pack(side=tk.LEFT, padx=4)
+        styled_button(btn_row, t("audio.moveUp"), self._move_up, padx=10).pack(side=tk.LEFT)
+        styled_button(btn_row, t("audio.moveDown"), self._move_down, padx=10).pack(side=tk.LEFT, padx=4)
+        self.bind_all(
+            "<Control-z>",
+            lambda e: self._undo() if self.app.current_stage == 2 else None,
+        )
+        self.bind_all(
+            "<Control-y>",
+            lambda e: self._redo() if self.app.current_stage == 2 else None,
+        )
 
         edit_row = tk.Frame(self, bg=THEME['bg_card'])
         edit_row.pack(fill=tk.X, padx=24, pady=(0, 10))
@@ -1674,14 +2562,14 @@ class Stage2MusicEdit(tk.Frame):
         self.track_fade_in_var = tk.DoubleVar(value=0.01)
         self.track_fade_out_var = tk.DoubleVar(value=0.01)
         self.track_edit_label = styled_label(
-            edit_row, "선택 곡 설정", size=10, bold=True,
+            edit_row, t("audio.trackSettings"), size=10, bold=True,
             bg=THEME['bg_card'],
         )
         self.track_edit_label.pack(side=tk.LEFT, padx=(10, 12))
         for label, variable, upper, resolution in (
-            ("볼륨", self.track_volume_var, 2.0, 0.05),
-            ("페이드 인", self.track_fade_in_var, 10.0, 0.1),
-            ("페이드 아웃", self.track_fade_out_var, 10.0, 0.1),
+            (t("audio.volume"), self.track_volume_var, 2.0, 0.05),
+            (t("audio.fadeIn"), self.track_fade_in_var, 10.0, 0.1),
+            (t("audio.fadeOut"), self.track_fade_out_var, 10.0, 0.1),
         ):
             styled_label(
                 edit_row, label, size=9, bg=THEME['bg_card']
@@ -1706,7 +2594,7 @@ class Stage2MusicEdit(tk.Frame):
             self.track_fade_in_var.set(float(track.get('fade_in', 0.01)))
             self.track_fade_out_var.set(float(track.get('fade_out', 0.01)))
             self.track_edit_label.configure(
-                text=f"선택 곡 설정 · {track.get('filename', '')[:28]}"
+                text=t("audio.trackSettingsName", name=track.get('filename', '')[:28])
             )
         finally:
             self._updating_track_controls = False
@@ -1740,19 +2628,24 @@ class Stage2MusicEdit(tk.Frame):
         tracks = self.app.video_groups[self.selected_group].get('tracks', [])
         rects = []
         x_cursor = 0
-        for i, t in enumerate(tracks):
-            ts = t.get('trim_start', 0)
-            te = t.get('trim_end', 0)
-            a = t.get('analysis')
+        for i, tr in enumerate(tracks):
+            ts = tr.get('trim_start', 0)
+            te = tr.get('trim_end', 0)
+            a = tr.get('analysis')
             if a:
                 if te <= 0:
                     te = a.duration
                 dur = max(0.1, te - ts)
             else:
-                dur = t.get('duration', 1)
+                dur = tr.get('duration', 1)
+            fade_in = min(float(tr.get('fade_in', 0.01)), dur / 2)
+            fade_out = min(float(tr.get('fade_out', 0.01)), dur / 2)
             x_start = x_cursor
             x_end = x_cursor + dur
-            rects.append({'idx': i, 'x_start': x_start, 'x_end': x_end, 'track': t})
+            rects.append({
+                'idx': i, 'x_start': x_start, 'x_end': x_end, 'track': tr,
+                'fade_in': fade_in, 'fade_out': fade_out,
+            })
             x_cursor = x_end
         self._track_rects = rects
         group = self.app.video_groups[self.selected_group]
@@ -1760,11 +2653,12 @@ class Stage2MusicEdit(tk.Frame):
         self._precompute_waveforms()
 
     def _precompute_waveforms(self):
-        if not _loaded or not _load_audio_pydub:
-            return
+        total = len(self._track_rects)
+        ready = 0
         for r in self._track_rects:
             fp = r['track'].get('filepath', '')
             if not fp or fp in self._waveform_cache:
+                ready += 1
                 continue
             try:
                 analysis = r['track'].get('analysis')
@@ -1778,45 +2672,59 @@ class Stage2MusicEdit(tk.Frame):
                             args=(fp,), daemon=True,
                         ).start()
                     continue
-                if samples is None or len(samples) == 0:
-                    continue
-                num_peaks = 1200
-                chunk = max(1, len(samples) // num_peaks)
-                usable = len(samples) - (len(samples) % chunk)
-                body = samples[:usable].reshape(-1, chunk)
-                peaks = list(zip(
-                    _np.min(body, axis=1).astype(float),
-                    _np.max(body, axis=1).astype(float),
-                ))
-                if usable < len(samples):
-                    tail = samples[usable:]
-                    peaks.append((float(_np.min(tail)), float(_np.max(tail))))
+                peaks = _waveform_peaks(samples)
                 self._waveform_cache[fp] = (peaks, sr, len(samples))
-            except Exception:
-                pass
+                ready += 1
+            except Exception as error:
+                logger.debug("Waveform cache failed for %s: %s", fp, error)
+        self._update_waveform_progress(ready, total)
 
     def _load_waveform_async(self, filepath):
         try:
+            _ensure_analysis_modules()
             samples, sr = _load_audio_pydub(filepath)
             if samples is None or len(samples) == 0:
                 return
-            num_peaks = 1200
-            chunk = max(1, len(samples) // num_peaks)
-            usable = len(samples) - (len(samples) % chunk)
-            body = samples[:usable].reshape(-1, chunk)
-            peaks = list(zip(
-                _np.min(body, axis=1).astype(float),
-                _np.max(body, axis=1).astype(float),
-            ))
-            if usable < len(samples):
-                tail = samples[usable:]
-                peaks.append((float(_np.min(tail)), float(_np.max(tail))))
-            self._waveform_cache[filepath] = (peaks, sr, len(samples))
-            self.after(0, self._draw_timeline)
-        except Exception:
-            pass
+            peaks = _waveform_peaks(samples)
+            self.after(
+                0,
+                lambda: self._waveform_ready(
+                    filepath, (peaks, sr, len(samples))
+                ),
+            )
+        except Exception as error:
+            logger.debug(
+                "Waveform loading failed for %s: %s", filepath, error
+            )
         finally:
             self._waveform_loading.discard(filepath)
+
+    def _waveform_ready(self, filepath, cached):
+        self._waveform_cache[filepath] = cached
+        self._update_waveform_progress(
+            sum(
+                1 for rect in self._track_rects
+                if rect['track'].get('filepath') in self._waveform_cache
+            ),
+            len(self._track_rects),
+        )
+        self._draw_timeline()
+
+    def _update_waveform_progress(self, ready, total):
+        if total <= 0 or ready >= total:
+            self.wave_progress.pack_forget()
+            self.wave_progress_label.configure(text="")
+            return
+        percent = int(ready / total * 100)
+        self.wave_progress.configure(value=percent)
+        if not self.wave_progress.winfo_manager():
+            self.wave_progress.pack(side=tk.RIGHT, padx=(8, 0))
+        self.wave_progress_label.configure(
+            text=t(
+                "progressOverlay.waveformCount",
+                current=ready, total=total, percent=percent,
+            )
+        )
 
     def _draw_timeline(self):
         self.tl_canvas.delete("all")
@@ -1847,16 +2755,22 @@ class Stage2MusicEdit(tk.Frame):
             major_step = 60
             minor_step = 30
 
-        for s in range(0, n_secs + 1):
+        for s in range(n_secs + 1):
             x = int(s * pps)
             if x > int(total_dur * pps) + cw:
                 break
             if s % major_step == 0:
-                self.tl_canvas.create_line(x, lane_top, x, ch, fill=THEME['separator'], width=1)
+                self.tl_canvas.create_line(
+                    x, lane_top, x, ch,
+                    fill=THEME['timeline_grid'], width=1,
+                )
                 self.tl_canvas.create_text(x + 3, lane_top - 12, text=_fmt_ts(s),
                                            fill=THEME['fg_dim'], font=_font(8), anchor=tk.W)
             elif s % minor_step == 0:
-                self.tl_canvas.create_line(x, lane_top, x, ch, fill=THEME['bg_hover'], width=1)
+                self.tl_canvas.create_line(
+                    x, lane_top, x, ch,
+                    fill=THEME['timeline_grid_minor'], width=1,
+                )
 
         for ri, r in enumerate(self._track_rects):
             x1 = int(r['x_start'] * pps)
@@ -1866,10 +2780,18 @@ class Stage2MusicEdit(tk.Frame):
             color = _TIMELINE_COLORS[ri % len(_TIMELINE_COLORS)]
             is_sel = (ri == self.tl_sel)
 
-            self.tl_canvas.create_rectangle(x1, y1, x2, y2,
-                                            fill=color if is_sel else THEME['bg_input'],
-                                            outline=color, width=2 if is_sel else 1,
-                                            tags=("tl_rect", f"tl_{ri}"))
+            lane_fill = (
+                THEME['timeline_selection'] if is_sel
+                else THEME[
+                    'timeline_lane_alt' if ri % 2 else 'timeline_lane'
+                ]
+            )
+            self.tl_canvas.create_rectangle(
+                x1, y1, x2, y2, fill=lane_fill,
+                outline=color if not is_sel else THEME['accent'],
+                width=3 if is_sel else 1,
+                tags=("tl_rect", f"tl_{ri}"),
+            )
 
             fp = r['track'].get('filepath', '')
             cached = self._waveform_cache.get(fp)
@@ -1891,39 +2813,60 @@ class Stage2MusicEdit(tk.Frame):
                 wave_w = x2 - x1 - 16
                 if wave_w > 10 and len(peaks) > 1:
                     mid_y = (y1 + y2) / 2
-                    max_abs = max(max(abs(lo), abs(hi)) for lo, hi in peaks) or 1.0
+                    max_abs = max(
+                        max(abs(low), abs(high)) for low, high in peaks
+                    ) or 1.0
                     pts = []
                     step = wave_w / len(peaks)
-                    for pi, (lo, hi) in enumerate(peaks):
+                    for pi, (_low, high) in enumerate(peaks):
                         px = x1 + 8 + int(pi * step)
-                        norm_hi = hi / max_abs
+                        norm_hi = high / max_abs
                         half_h = (y2 - y1 - 12) / 2
                         pts.append((px, int(mid_y - norm_hi * half_h)))
                     for pi in range(len(peaks) - 1, -1, -1):
-                        lo, hi = peaks[pi]
+                        low, _high = peaks[pi]
                         px = x1 + 8 + int(pi * step)
-                        norm_lo = lo / max_abs
+                        norm_lo = low / max_abs
                         half_h = (y2 - y1 - 12) / 2
                         pts.append((px, int(mid_y - norm_lo * half_h)))
                     if len(pts) >= 3:
                         flat = []
                         for px_c, py_c in pts:
                             flat.extend([px_c, py_c])
-                        wave_color = '#ffffff' if is_sel else THEME['fg_dim']
+                        wave_color = (
+                            '#ffffff' if is_sel else THEME['wave_line']
+                        )
                         self.tl_canvas.create_polygon(flat, fill=wave_color, outline='',
                                                        stipple='gray25' if not is_sel else '',
                                                        tags=(f"tl_{ri}",))
 
             a = r['track'].get('analysis')
+            track_dur = max(0.1, r['x_end'] - r['x_start'])
             fname = r['track'].get('filename', '')
             if len(fname) > 20:
                 fname = fname[:17] + "..."
             label = fname
             if a:
-                dur_sec = r['x_end'] - r['x_start']
-                label = f"{fname}  {_fmt_ts(dur_sec)}"
-            self.tl_canvas.create_text(x1 + 8, y1 + 4, text=label,
+                label = f"{fname}  {_fmt_ts(track_dur)}"
+
+            fade_in_px = int(r.get('fade_in', 0) / track_dur * (x2 - x1)) if track_dur > 0 else 0
+            fade_out_px = int(r.get('fade_out', 0) / track_dur * (x2 - x1)) if track_dur > 0 else 0
+
+            self.tl_canvas.create_text(x1 + fade_in_px + 8, y1 + 4, text=label,
                                        fill=THEME['fg'], font=_font(9), anchor=tk.NW, tags=(f"tl_{ri}",))
+
+            if fade_in_px > 2:
+                self.tl_canvas.create_rectangle(x1, y1, x1 + fade_in_px, y2,
+                                                fill='', outline='',
+                                                stipple='gray50', tags=(f"tl_{ri}",))
+                self.tl_canvas.create_text(x1 + 2, y1 + 2, text=t("audio.fadeInShort"),
+                                           fill=THEME['fg_dim'], font=_font(7), anchor=tk.NW, tags=(f"tl_{ri}",))
+            if fade_out_px > 2:
+                self.tl_canvas.create_rectangle(x2 - fade_out_px, y1, x2, y2,
+                                                fill='', outline='',
+                                                stipple='gray50', tags=(f"tl_{ri}",))
+                self.tl_canvas.create_text(x2 - 2, y1 + 2, text=t("audio.fadeOutShort"),
+                                           fill=THEME['fg_dim'], font=_font(7), anchor=tk.NE, tags=(f"tl_{ri}",))
 
             edge_w = max(6, min(16, int((x2 - x1) * 0.10)))
             self.tl_canvas.create_rectangle(x1, y1, x1 + edge_w, y2,
@@ -1949,15 +2892,15 @@ class Stage2MusicEdit(tk.Frame):
         playhead_x = int(self.playhead_sec * pps)
         self.tl_canvas.create_line(
             playhead_x, 4, playhead_x, lane_top + self.LANE_H + 4,
-            fill=THEME['danger'], width=2, tags=("playhead",)
+            fill=THEME['timeline_playhead'], width=3, tags=("playhead",)
         )
         self.tl_canvas.create_polygon(
             playhead_x - 5, 4, playhead_x + 5, 4, playhead_x, 11,
-            fill=THEME['danger'], outline='', tags=("playhead",)
+            fill=THEME['timeline_playhead'], outline='', tags=("playhead",)
         )
 
-        time_label = f"총 {_fmt_ts(total_dur)} ({int(total_dur)}초)"
-        info = f"트랙 {len(self._track_rects)}개  |  {time_label}"
+        time_label = t("audio.totalTime", time=_fmt_ts(total_dur), seconds=int(total_dur))
+        info = t("audio.trackInfo", count=len(self._track_rects), time=time_label)
         if 0 <= self.tl_sel < len(self._track_rects):
             selected = self._track_rects[self.tl_sel]['track']
             analysis = selected.get('analysis')
@@ -1966,11 +2909,7 @@ class Stage2MusicEdit(tk.Frame):
                 end = selected.get('trim_end', analysis.duration)
                 if end <= 0:
                     end = analysis.duration
-                info += (
-                    f"  |  선택: {selected.get('filename', '')}"
-                    f"  {self._fmt_precise(start)} → {self._fmt_precise(end)}"
-                    f"  ({self._fmt_precise(end - start)})"
-                )
+                info += t("audio.selectedInfo", name=selected.get('filename', ''), start=self._fmt_precise(start), end=self._fmt_precise(end), duration=self._fmt_precise(end - start))
         self.tl_info.configure(text=info)
 
         if self.selected_group >= 0:
@@ -2043,11 +2982,10 @@ class Stage2MusicEdit(tk.Frame):
             return
         cx = self.tl_canvas.canvasx(event.x)
         pps = self.tl_px_per_sec
-        sec = cx / max(pps, 1)
         tracks = self.app.video_groups[self.selected_group].get('tracks', [])
         ri = self.tl_drag['idx']
-        t = tracks[ri]
-        a = t.get('analysis')
+        tr = tracks[ri]
+        a = tr.get('analysis')
         if not a:
             return
         orig_dur = a.duration
@@ -2063,13 +3001,13 @@ class Stage2MusicEdit(tk.Frame):
                     self.tl_drag['initial_end'] - MIN_TRIM_SECONDS,
                 ),
             )
-            t['trim_start'] = new_start
+            tr['trim_start'] = new_start
         elif mode == 'trim_end':
             new_end = max(
                 self.tl_drag['initial_start'] + MIN_TRIM_SECONDS,
                 min(self.tl_drag['initial_end'] + delta, orig_dur),
             )
-            t['trim_end'] = new_end
+            tr['trim_end'] = new_end
         elif mode in ('reorder_pending', 'reorder'):
             if mode == 'reorder_pending' and abs(cx - self.tl_drag['press_x']) < 6:
                 return
@@ -2080,14 +3018,10 @@ class Stage2MusicEdit(tk.Frame):
         self._recompute_positions()
         self._draw_timeline()
         if mode in ('trim_start', 'trim_end'):
-            start = t.get('trim_start', 0.0)
-            end = t.get('trim_end', orig_dur)
+            start = tr.get('trim_start', 0.0)
+            end = tr.get('trim_end', orig_dur)
             self.tl_info.configure(
-                text=(
-                    f"트림 중  |  시작 {self._fmt_precise(start)}"
-                    f"  →  종료 {self._fmt_precise(end)}"
-                    f"  |  길이 {self._fmt_precise(end - start)}"
-                )
+                text=t("audio.trimInfo", start=self._fmt_precise(start), end=self._fmt_precise(end), duration=self._fmt_precise(end - start))
             )
 
     def _tl_release(self, event):
@@ -2198,7 +3132,7 @@ class Stage2MusicEdit(tk.Frame):
 
     def _play_selection(self):
         if not (0 <= self.tl_sel < len(self._track_rects)):
-            messagebox.showinfo("미리듣기", "먼저 트랙을 선택하세요.")
+            messagebox.showinfo(t("audio.preview"), t("audio.previewNeedSelect"))
             return
         track = self._track_rects[self.tl_sel]['track']
         analysis = track.get('analysis')
@@ -2206,13 +3140,13 @@ class Stage2MusicEdit(tk.Frame):
             return
         if self._preview_player is None:
             from audio_preview import AudioPreviewPlayer
-            self._preview_player = AudioPreviewPlayer(video_gen._find_ffmpeg_exe)
+            self._preview_player = AudioPreviewPlayer()
         start = track.get('trim_start', 0.0)
         end = track.get('trim_end', analysis.duration)
         if end <= 0:
             end = analysis.duration
         timeline_start = self._track_rects[self.tl_sel]['x_start']
-        self.tl_info.configure(text="미리듣기 준비 중...")
+        self.tl_info.configure(text=t("audio.previewReady"))
         self._preview_player.play(
             track.get('filepath', ''), start, end - start,
             volume=float(track.get('volume', 1.0)),
@@ -2224,7 +3158,7 @@ class Stage2MusicEdit(tk.Frame):
                 )
             ),
             on_error=lambda error: self.after(
-                0, lambda: messagebox.showerror("미리듣기 오류", str(error))
+                0, lambda: messagebox.showerror(t("audio.previewError"), str(error))
             ),
         )
 
@@ -2349,38 +3283,38 @@ class Stage2MusicEdit(tk.Frame):
         tracks = self.app.video_groups[self.selected_group].get('tracks', [])
         if idx < 0 or idx >= len(tracks):
             return
-        t = tracks[idx]
-        a = t.get('analysis')
+        tr = tracks[idx]
+        a = tr.get('analysis')
         if not a:
             return
-        ts = t.get('trim_start', 0)
-        te = t.get('trim_end', a.duration)
+        ts = tr.get('trim_start', 0)
+        te = tr.get('trim_end', a.duration)
 
         win = tk.Toplevel(self)
-        win.title(f"트림 편집 — {t.get('filename', '')}")
+        win.title(t("audio.trimTitle", name=tr.get('filename', '')))
         win.configure(bg=THEME['bg_main'])
         win.geometry("420x300")
         win.resizable(False, False)
         win.grab_set()
 
-        styled_label(win, t.get('filename', ''), size=12, bold=True, bg=THEME['bg_main']).pack(pady=(16, 4))
-        styled_label(win, f"총 길이: {self._sec_to_hms(a.duration)}", size=10, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(pady=(0, 12))
+        styled_label(win, tr.get('filename', ''), size=12, bold=True, bg=THEME['bg_main']).pack(pady=(16, 4))
+        styled_label(win, t("audio.totalLength", duration=self._sec_to_hms(a.duration)), size=10, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(pady=(0, 12))
 
         sf = tk.Frame(win, bg=THEME['bg_main'])
         sf.pack(fill=tk.X, padx=30, pady=4)
-        styled_label(sf, "시작 시간:", size=10, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_label(sf, t("audio.startTime"), size=10, bg=THEME['bg_main']).pack(side=tk.LEFT)
         start_ent = styled_entry(sf, width=14)
         start_ent.insert(0, self._sec_to_hms(ts))
         start_ent.pack(side=tk.RIGHT)
 
         ef = tk.Frame(win, bg=THEME['bg_main'])
         ef.pack(fill=tk.X, padx=30, pady=4)
-        styled_label(ef, "끝 시간:", size=10, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_label(ef, t("audio.endTime"), size=10, bg=THEME['bg_main']).pack(side=tk.LEFT)
         end_ent = styled_entry(ef, width=14)
         end_ent.insert(0, self._sec_to_hms(te))
         end_ent.pack(side=tk.RIGHT)
 
-        styled_label(win, "예: 03:25:500", size=9, color=THEME['fg_dimmer'], bg=THEME['bg_main']).pack(pady=(2, 12))
+        styled_label(win, t("audio.timeHint"), size=9, color=THEME['fg_dimmer'], bg=THEME['bg_main']).pack(pady=(2, 12))
 
         btn_frame = tk.Frame(win, bg=THEME['bg_main'])
         btn_frame.pack(pady=8)
@@ -2390,8 +3324,8 @@ class Stage2MusicEdit(tk.Frame):
                 self._push_history()
                 new_start = max(0, min(self._hms_to_sec(start_ent.get()), a.duration))
                 new_end = max(new_start + 0.5, min(self._hms_to_sec(end_ent.get()), a.duration))
-                t['trim_start'] = new_start
-                t['trim_end'] = new_end
+                tr['trim_start'] = new_start
+                tr['trim_end'] = new_end
                 self._recompute_positions()
                 self._draw_timeline()
                 self.app.persist_video_groups()
@@ -2399,8 +3333,8 @@ class Stage2MusicEdit(tk.Frame):
             except Exception:
                 pass
 
-        styled_button(btn_frame, "적용", apply_trim, "primary", padx=16, pady=4).pack(side=tk.LEFT, padx=6)
-        styled_button(btn_frame, "취소", win.destroy, padx=16, pady=4).pack(side=tk.LEFT, padx=6)
+        styled_button(btn_frame, t("common.apply"), apply_trim, "primary", padx=16, pady=4).pack(side=tk.LEFT, padx=6)
+        styled_button(btn_frame, t("common.cancel"), win.destroy, "danger", padx=16, pady=4).pack(side=tk.LEFT, padx=6)
         start_ent.bind("<Return>", lambda e: apply_trim())
         end_ent.bind("<Return>", lambda e: apply_trim())
 
@@ -2409,11 +3343,11 @@ class Stage2MusicEdit(tk.Frame):
             return
         self._push_history()
         tracks = self.app.video_groups[self.selected_group].get('tracks', [])
-        for t in tracks:
-            a = t.get('analysis')
+        for tr in tracks:
+            a = tr.get('analysis')
             if a:
-                t['trim_start'] = 0
-                t['trim_end'] = a.duration
+                tr['trim_start'] = 0
+                tr['trim_end'] = a.duration
         self._recompute_positions()
         self._draw_timeline()
         self.app.persist_video_groups()
@@ -2493,64 +3427,308 @@ class Stage2ClipList(tk.Frame):
         super().__init__(parent, bg=THEME['bg_main'])
         self.app = app
         self.selected_group = 0
+        self._thumbnail_cache = {}
+        self._thumbnail_generation = 0
+        self._thumbnail_photo = None
+        self._thumbnail_results = queue.Queue()
+        self._thumbnail_after_id = None
         self.build_ui()
+        self._thumbnail_after_id = self.after(50, self._drain_thumbnail_results)
 
     def build_ui(self):
-        styled_label(self, "클립 목록", size=20, bold=True, bg=THEME['bg_main']).pack(pady=(14, 2))
-        styled_label(self, "각 그룹별로 이미지/영상을 설정합니다 (전환 간격, 랜덤 등)",
+        hdr = tk.Frame(self, bg=THEME['bg_main'])
+        hdr.pack(fill=tk.X, padx=24, pady=(14, 0))
+        styled_label(hdr, t("clip.title"), size=20, bold=True, bg=THEME['bg_main']).pack(side=tk.LEFT)
+        styled_button(hdr, t("common.save"), lambda: self.app.persist_video_groups(), padx=10).pack(side=tk.RIGHT, padx=2)
+        styled_label(self, t("clip.desc"),
                      size=11, color=THEME['fg_dim'], bg=THEME['bg_main']).pack(pady=(0, 6))
 
         self.tabs_container = tk.Frame(self, bg=THEME['bg_main'])
         self.tabs_container.pack(fill=tk.X, padx=24, pady=(0, 4))
 
-        main = tk.Frame(self, bg=THEME['bg_main'])
+        main = tk.PanedWindow(
+            self, orient=tk.HORIZONTAL, bg=THEME['panel_sash'],
+            sashwidth=7, sashrelief=tk.FLAT, borderwidth=0,
+            showhandle=False,
+        )
         main.pack(fill=tk.BOTH, expand=True, padx=24, pady=(0, 16))
 
         left = tk.Frame(main, bg=THEME['bg_card'])
-        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 6))
-        styled_label(left, "클립 목록", size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
+        main.add(left, minsize=280, stretch="always")
+        styled_label(left, t("clip.list"), size=11, bold=True, bg=THEME['bg_card']).pack(pady=(10, 4), padx=10, anchor=tk.W)
 
         self.clip_listbox = styled_listbox(left)
         self.clip_listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.clip_listbox.bind("<<ListboxSelect>>", self._on_clip_selected)
 
         clip_btn_row = tk.Frame(left, bg=THEME['bg_card'])
         clip_btn_row.pack(fill=tk.X, padx=10, pady=(0, 10))
-        styled_button(clip_btn_row, "이미지 추가", self._add_images, padx=8).pack(side=tk.LEFT)
-        styled_button(clip_btn_row, "영상 추가", self._add_videos, padx=8).pack(side=tk.LEFT, padx=(4, 0))
-        styled_button(clip_btn_row, "선택 삭제", self._remove_selected, "danger", padx=8).pack(side=tk.LEFT, padx=(4, 0))
-        styled_button(clip_btn_row, "▲", self._move_up, padx=4).pack(side=tk.RIGHT)
-        styled_button(clip_btn_row, "▼", self._move_down, padx=4).pack(side=tk.RIGHT, padx=(0, 4))
+        styled_button(clip_btn_row, t("clip.addImage"), self._add_images, "success", padx=8).pack(side=tk.LEFT)
+        styled_button(clip_btn_row, t("clip.addVideo"), self._add_videos, "success", padx=8).pack(side=tk.LEFT, padx=(4, 0))
+        styled_button(clip_btn_row, t("clip.deleteSelected"), self._remove_selected, "danger", padx=8).pack(side=tk.LEFT, padx=(4, 0))
+        styled_button(clip_btn_row, t("clip.moveUp"), self._move_up, padx=4).pack(side=tk.RIGHT)
+        styled_button(clip_btn_row, t("clip.moveDown"), self._move_down, padx=4).pack(side=tk.RIGHT, padx=(0, 4))
 
         right = tk.Frame(main, bg=THEME['bg_card'])
-        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(6, 0))
+        main.add(right, minsize=360, stretch="always")
+        self.clip_preview_ratio = 0.48
+        self.clip_vertical_pane = tk.PanedWindow(
+            right, orient=tk.VERTICAL, bg=THEME['panel_sash'],
+            sashwidth=9, sashrelief=tk.FLAT, borderwidth=0,
+            showhandle=True, cursor="sb_v_double_arrow",
+        )
+        self.clip_vertical_pane.pack(fill=tk.BOTH, expand=True)
+        preview_panel = tk.Frame(
+            self.clip_vertical_pane, bg=THEME['bg_card']
+        )
+        settings_panel = tk.Frame(
+            self.clip_vertical_pane, bg=THEME['bg_card']
+        )
+        self.clip_vertical_pane.add(
+            preview_panel, minsize=180, stretch="always"
+        )
+        self.clip_vertical_pane.add(
+            settings_panel, minsize=190, stretch="always"
+        )
+        self.clip_vertical_pane.bind(
+            "<ButtonRelease-1>", self._remember_clip_preview_ratio,
+            add="+",
+        )
+        self.after_idle(self._restore_clip_preview_ratio)
 
-        sec_label = styled_label(right, "설정", size=11, bold=True, bg=THEME['bg_card'])
+        styled_label(
+            preview_panel, t("clip.preview"), size=11, bold=True,
+            bg=THEME['bg_card']
+        ).pack(pady=(10, 4), padx=10, anchor=tk.W)
+        self.clip_preview_canvas = tk.Canvas(
+            preview_panel, width=360, height=240, bg="#000000",
+            highlightthickness=1, highlightbackground=THEME['border'],
+        )
+        self.clip_preview_canvas.pack(
+            fill=tk.BOTH, expand=True, padx=10, pady=(0, 4)
+        )
+        self.clip_preview_canvas.bind(
+            "<Configure>",
+            lambda _event: self._refresh_selected_thumbnail(),
+            add="+",
+        )
+        self.clip_preview_canvas.create_text(
+            180, 100, text=t("clip.previewSelect"), fill=THEME['fg_dim'],
+            font=_font(9), tags="message",
+        )
+        self.clip_preview_meta = styled_label(
+            preview_panel, "", size=8, color=THEME['fg_dim'],
+            bg=THEME['bg_card']
+        )
+        self.clip_preview_meta.pack(fill=tk.X, padx=10, pady=(0, 4))
+
+        sec_label = styled_label(
+            settings_panel, t("clip.settings"), size=11, bold=True,
+            bg=THEME['bg_card'],
+        )
         sec_label.pack(pady=(10, 8), padx=10, anchor=tk.W)
 
         self.clip_enabled = tk.BooleanVar(value=False)
-        ef = tk.Frame(right, bg=THEME['bg_card'])
+        ef = tk.Frame(settings_panel, bg=THEME['bg_card'])
         ef.pack(fill=tk.X, padx=10, pady=2)
-        styled_checkbutton(ef, "클립 전환 사용", self.clip_enabled, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        styled_checkbutton(ef, t("clip.useTransition"), self.clip_enabled, bg=THEME['bg_card']).pack(side=tk.LEFT)
 
-        styled_label(right, "전환 간격:", size=10, bg=THEME['bg_card']).pack(anchor=tk.W, padx=10, pady=(10, 2))
-        iv = tk.Frame(right, bg=THEME['bg_card'])
+        styled_label(settings_panel, t("clip.interval"), size=10, bg=THEME['bg_card']).pack(anchor=tk.W, padx=10, pady=(10, 2))
+        iv = tk.Frame(settings_panel, bg=THEME['bg_card'])
         iv.pack(fill=tk.X, padx=10, pady=2)
         self.clip_interval = tk.DoubleVar(value=1.0)
-        styled_scale(iv, self.clip_interval, 0.1, 30.0, 0.1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.clip_interval_unit = tk.StringVar(value="초")
-        styled_option_menu(iv, self.clip_interval_unit, ["초", "박자", "곡별"]).pack(side=tk.LEFT, padx=(8, 0))
+        self.clip_interval_scale = styled_scale(
+            iv, self.clip_interval, 0.1, 30.0, 0.1,
+            bg=THEME['bg_card'],
+        )
+        self.clip_interval_scale.pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+        self.clip_interval_scale.bind(
+            "<ButtonRelease-1>",
+            lambda _event: self._sync_group_settings(save=True),
+            add="+",
+        )
+        self.clip_interval_unit = tk.StringVar(value="seconds")
+        styled_choice_menu(
+            iv, self.clip_interval_unit, {
+                "seconds": "clip.seconds",
+                "beat": "clip.beat",
+                "per_track": "clip.perTrack",
+            }
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
-        styled_label(right, "랜덤:", size=10, bg=THEME['bg_card']).pack(anchor=tk.W, padx=10, pady=(10, 2))
-        rf = tk.Frame(right, bg=THEME['bg_card'])
+        styled_label(settings_panel, t("clip.random"), size=10, bg=THEME['bg_card']).pack(anchor=tk.W, padx=10, pady=(10, 2))
+        rf = tk.Frame(settings_panel, bg=THEME['bg_card'])
         rf.pack(fill=tk.X, padx=10, pady=2)
         self.clip_random = tk.BooleanVar(value=False)
-        styled_checkbutton(rf, "랜덤 재생", self.clip_random, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        self.clip_random_base = tk.StringVar(value="BPM")
-        styled_option_menu(rf, self.clip_random_base, ["BPM", "키", "캠롯", "곡 순서"]).pack(side=tk.LEFT, padx=(8, 0))
+        styled_checkbutton(rf, t("clip.randomPlay"), self.clip_random, bg=THEME['bg_card']).pack(side=tk.LEFT)
+        self.clip_random_base = tk.StringVar(value="bpm")
+        styled_choice_menu(
+            rf, self.clip_random_base, {
+                "bpm": "clip.sortBpm",
+                "key": "clip.sortKey",
+                "camelot": "clip.sortCamelot",
+                "order": "clip.sortOrder",
+            }
+        ).pack(side=tk.LEFT, padx=(8, 0))
 
-        styled_label(right, "", size=1, bg=THEME['bg_card']).pack()
-        self._clip_status = styled_label(right, "클립: 0개", size=10, color=THEME['fg_dim'], bg=THEME['bg_card'])
+        styled_label(settings_panel, "", size=1, bg=THEME['bg_card']).pack()
+        self._clip_status = styled_label(settings_panel, t("clip.clipCount", count=0), size=10, color=THEME['fg_dim'], bg=THEME['bg_card'])
         self._clip_status.pack(anchor=tk.W, padx=10, pady=(6, 0))
+
+    def _restore_clip_preview_ratio(self):
+        pane = self.clip_vertical_pane
+        height = pane.winfo_height()
+        if height <= 1:
+            return
+        position = max(180, min(height - 190, int(
+            height * float(self.clip_preview_ratio)
+        )))
+        try:
+            pane.sash_place(0, 0, position)
+        except tk.TclError:
+            pass
+
+    def _remember_clip_preview_ratio(self, _event=None):
+        try:
+            height = max(1, self.clip_vertical_pane.winfo_height())
+            _x, y = self.clip_vertical_pane.sash_coord(0)
+            self.clip_preview_ratio = max(0.25, min(0.75, y / height))
+            self.app.persist_video_groups()
+        except tk.TclError:
+            pass
+
+    def _refresh_selected_thumbnail(self):
+        if self.clip_listbox.curselection():
+            self._on_clip_selected()
+
+    def _on_clip_selected(self, _event=None):
+        selection = self.clip_listbox.curselection()
+        if not selection or not (0 <= self.selected_group < len(self.app.video_groups)):
+            self._show_thumbnail_message(t("clip.previewSelect"))
+            return
+        clips = self.app.video_groups[self.selected_group].get("clips", [])
+        index = selection[0]
+        if index >= len(clips):
+            return
+        self._load_clip_thumbnail(clips[index])
+
+    def _show_thumbnail_message(self, message):
+        self.clip_preview_canvas.delete("all")
+        self.clip_preview_canvas.create_text(
+            max(1, self.clip_preview_canvas.winfo_width()) // 2,
+            max(1, self.clip_preview_canvas.winfo_height()) // 2,
+            text=message, fill=THEME['fg_dim'], font=_font(9),
+        )
+        self.clip_preview_meta.configure(text="")
+        self._thumbnail_photo = None
+
+    def _load_clip_thumbnail(self, clip):
+        filepath = clip.get("filepath", "")
+        if not os.path.isfile(filepath):
+            self._show_thumbnail_message(t("clip.previewMissing"))
+            return
+        try:
+            key = (os.path.abspath(filepath), os.path.getmtime(filepath))
+        except OSError:
+            self._show_thumbnail_message(t("clip.previewMissing"))
+            return
+        self._thumbnail_generation += 1
+        generation = self._thumbnail_generation
+        cached = self._thumbnail_cache.get(key)
+        if cached is not None:
+            self._display_clip_thumbnail(cached, filepath)
+            return
+        self._show_thumbnail_message(t("clip.previewLoading"))
+
+        def worker():
+            temp_path = None
+            try:
+                from PIL import Image
+                if clip.get("type") == "video":
+                    import tempfile
+                    from ffmpeg_service import ensure_ffmpeg_available
+                    fd, temp_path = tempfile.mkstemp(
+                        prefix="apm_thumb_", suffix=".jpg"
+                    )
+                    os.close(fd)
+                    result = subprocess.run([
+                        ensure_ffmpeg_available(), "-hide_banner", "-loglevel",
+                        "error", "-y", "-ss", "1", "-i", filepath,
+                        "-frames:v", "1", "-vf",
+                        "scale=640:360:force_original_aspect_ratio=decrease",
+                        temp_path,
+                    ], capture_output=True, creationflags=(
+                        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    ))
+                    if result.returncode:
+                        raise RuntimeError(result.stderr.decode(errors="replace"))
+                    image = Image.open(temp_path).convert("RGB").copy()
+                else:
+                    image = Image.open(filepath).convert("RGB")
+                image.thumbnail((640, 360), Image.Resampling.LANCZOS)
+                self._thumbnail_cache[key] = image.copy()
+                if generation == self._thumbnail_generation:
+                    self._thumbnail_results.put(("image", generation, image, filepath))
+            except Exception:
+                logger.exception("Clip thumbnail failed: %s", filepath)
+                if generation == self._thumbnail_generation:
+                    self._thumbnail_results.put(
+                        ("error", generation, t("clip.previewFailed"), None)
+                    )
+            finally:
+                if temp_path:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+        threading.Thread(target=worker, daemon=True, name="clip-thumbnail").start()
+
+    def _drain_thumbnail_results(self):
+        try:
+            while True:
+                kind, generation, payload, filepath = self._thumbnail_results.get_nowait()
+                if generation != self._thumbnail_generation:
+                    continue
+                if kind == "image":
+                    self._display_clip_thumbnail(payload, filepath)
+                else:
+                    self._show_thumbnail_message(payload)
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self._thumbnail_after_id = self.after(50, self._drain_thumbnail_results)
+
+    def destroy(self):
+        self._thumbnail_generation += 1
+        if self._thumbnail_after_id:
+            try:
+                self.after_cancel(self._thumbnail_after_id)
+            except tk.TclError:
+                pass
+            self._thumbnail_after_id = None
+        super().destroy()
+
+    def _display_clip_thumbnail(self, image, filepath):
+        from PIL import Image, ImageTk
+        width = max(100, self.clip_preview_canvas.winfo_width())
+        height = max(100, self.clip_preview_canvas.winfo_height())
+        preview = image.copy()
+        preview.thumbnail((width, height), Image.Resampling.LANCZOS)
+        self._thumbnail_photo = ImageTk.PhotoImage(
+            preview, master=self.clip_preview_canvas
+        )
+        self.clip_preview_canvas.delete("all")
+        self.clip_preview_canvas.create_image(
+            width // 2, height // 2, image=self._thumbnail_photo
+        )
+        name = os.path.basename(filepath)
+        if len(name) > 55:
+            name = name[:52] + "..."
+        self.clip_preview_meta.configure(
+            text=f"{name} · {image.width}×{image.height}"
+        )
 
     def _ensure_group_clips(self):
         media_fps = set()
@@ -2559,17 +3737,17 @@ class Stage2ClipList(tk.Frame):
                 g['clips'] = []
             for c in g.get('clips', []):
                 media_fps.add(os.path.abspath(c.get('filepath', '')))
-        media_items = [t for t in self.app.tracks if t.filetype in ("image", "video")]
-        for t in media_items:
-            absp = os.path.abspath(t.filepath)
+        media_items = [tr for tr in self.app.tracks if tr.filetype in ("image", "video")]
+        for tr in media_items:
+            absp = os.path.abspath(tr.filepath)
             if absp not in media_fps:
                 for g in self.app.video_groups:
-                    g['clips'].append({'filepath': t.filepath, 'type': t.filetype})
+                    g['clips'].append({'filepath': tr.filepath, 'type': tr.filetype})
                     media_fps.add(absp)
 
     def _add_images(self):
         exts = " ".join(f"*{e}" for e in IMAGE_EXTS)
-        files = filedialog.askopenfilenames(filetypes=[("이미지", exts)])
+        files = filedialog.askopenfilenames(filetypes=[(t("common.imageType"), exts)])
         if not files:
             return
         self._ensure_group_clips()
@@ -2582,7 +3760,7 @@ class Stage2ClipList(tk.Frame):
 
     def _add_videos(self):
         exts = " ".join(f"*{e}" for e in VIDEO_EXTS)
-        files = filedialog.askopenfilenames(filetypes=[("영상", exts)])
+        files = filedialog.askopenfilenames(filetypes=[(t("common.videoType"), exts)])
         if not files:
             return
         self._ensure_group_clips()
@@ -2601,7 +3779,7 @@ class Stage2ClipList(tk.Frame):
             return
         g = self.app.video_groups[self.selected_group]
         clips = g.get('clips', [])
-        for idx in reversed(sorted(sel)):
+        for idx in sorted(sel, reverse=True):
             if idx < len(clips):
                 clips.pop(idx)
         self._refresh_clip_list()
@@ -2637,15 +3815,15 @@ class Stage2ClipList(tk.Frame):
     def _refresh_clip_list(self):
         self.clip_listbox.delete(0, tk.END)
         if self.selected_group < 0 or self.selected_group >= len(self.app.video_groups):
-            self._clip_status.configure(text="클립: 0개")
+            self._clip_status.configure(text=t("clip.clipCount", count=0))
             return
         g = self.app.video_groups[self.selected_group]
         clips = g.get('clips', [])
         for i, c in enumerate(clips):
             name = os.path.basename(c.get('filepath', ''))
             tag = "IMG" if c.get('type') == 'image' else "VID"
-            self.clip_listbox.insert(tk.END, f"{i+1}. [{tag}] {name}")
-        self._clip_status.configure(text=f"클립: {len(clips)}개")
+            self.clip_listbox.insert(tk.END, t("clip.clipItem", index=i+1, tag=tag, name=name))
+        self._clip_status.configure(text=t("clip.clipCount", count=len(clips)))
 
     def _sync_group_settings(self, save=True):
         if self.selected_group < 0 or self.selected_group >= len(self.app.video_groups):
@@ -2660,9 +3838,26 @@ class Stage2ClipList(tk.Frame):
         else:
             self.clip_enabled.set(g.get('clip_enabled', False))
             self.clip_interval.set(g.get('clip_interval', 1.0))
-            self.clip_interval_unit.set(g.get('clip_interval_unit', '초'))
+            self.clip_interval_unit.set(_i18n_mod.choice_id(
+                g.get('clip_interval_unit', 'seconds'),
+                {
+                    "seconds": "clip.seconds",
+                    "beat": "clip.beat",
+                    "per_track": "clip.perTrack",
+                },
+                "seconds",
+            ))
             self.clip_random.set(g.get('clip_random', False))
-            self.clip_random_base.set(g.get('clip_random_base', 'BPM'))
+            self.clip_random_base.set(_i18n_mod.choice_id(
+                g.get('clip_random_base', 'bpm'),
+                {
+                    "bpm": "clip.sortBpm",
+                    "key": "clip.sortKey",
+                    "camelot": "clip.sortCamelot",
+                    "order": "clip.sortOrder",
+                },
+                "bpm",
+            ))
 
     def _set_group(self, idx):
         if idx == self.selected_group:
@@ -2686,1511 +3881,23 @@ class Stage2ClipList(tk.Frame):
         self._sync_group_settings(save=False)
         self._refresh_clip_list()
 
-
-# ─── Stage 4: 영상 편집 + 렌더링 ───
-
-class Stage3VideoEdit(tk.Frame):
-    def __init__(self, parent, app):
-        super().__init__(parent, bg=THEME['bg_main'])
-        self.app = app
-        self.selected_group = 0
-        self.build_ui()
-
-    def build_ui(self):
-        styled_label(self, "영상 편집 + 렌더링", size=20, bold=True, bg=THEME['bg_main']).pack(pady=(14, 2))
-
-        self.tabs_container = tk.Frame(self, bg=THEME['bg_main'])
-        self.tabs_container.pack(pady=(0, 4))
-
-        main = tk.PanedWindow(self, orient=tk.HORIZONTAL, bg=THEME['bg_main'], sashwidth=3, sashrelief=tk.FLAT)
-        main.pack(fill=tk.BOTH, expand=True, padx=15, pady=(8, 16))
-
-        left = tk.Frame(main, bg=THEME['bg_card'])
-        main.add(left, width=350, minsize=280)
-        canvas = tk.Canvas(left, bg=THEME['bg_card'], highlightthickness=0)
-        sb = tk.Scrollbar(left, orient=tk.VERTICAL, command=canvas.yview,
-                          bg=THEME['bg_mid'], troughcolor=THEME['bg_input'],
-                          activebackground=THEME['accent'], width=14, relief=tk.FLAT,
-                          highlightthickness=0)
-        sf = tk.Frame(canvas, bg=THEME['bg_card'])
-        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=sf, anchor=tk.NW)
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 2))
-
-        def _sf_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind("<MouseWheel>", _sf_mousewheel)
-        sf.bind("<MouseWheel>", _sf_mousewheel)
-        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _sf_mousewheel))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
-
-        self.viz_type = tk.StringVar(value="eq_bars")
-        self.viz_pos = tk.StringVar(value="bottom")
-        self.viz_color = tk.StringVar(value="#ffffff")
-        self.viz_bars = tk.IntVar(value=64)
-        self.viz_height = tk.IntVar(value=120)
-        self.viz_smooth = tk.DoubleVar(value=0.3)
-        self.viz_bar_width = tk.IntVar(value=0)
-        self.viz_bar_gap = tk.IntVar(value=2)
-        self.viz_min_height = tk.IntVar(value=1)
-        self.viz_sensitivity = tk.DoubleVar(value=1.0)
-        self.viz_opacity = tk.DoubleVar(value=0.85)
-        self.viz_corner_radius = tk.IntVar(value=2)
-        self.viz_decay = tk.DoubleVar(value=0.82)
-        self.viz_mirror = tk.BooleanVar(value=False)
-        self.viz_invert = tk.BooleanVar(value=False)
-        self.viz_gradient = tk.BooleanVar(value=True)
-        self.viz_glow = tk.IntVar(value=0)
-        self.viz_line_width = tk.IntVar(value=2)
-        self.bg_image = tk.StringVar(value="")
-        self.bg_fit_var = tk.StringVar(value="cover")
-        self.album_image_var = tk.StringVar(value="")
-        self.album_x_var = tk.IntVar(value=80)
-        self.album_y_var = tk.IntVar(value=80)
-        self.album_width_var = tk.IntVar(value=360)
-        self.album_opacity_var = tk.DoubleVar(value=1.0)
-        self.logo_image_var = tk.StringVar(value="")
-        self.logo_x_var = tk.IntVar(value=1660)
-        self.logo_y_var = tk.IntVar(value=60)
-        self.logo_width_var = tk.IntVar(value=180)
-        self.logo_opacity_var = tk.DoubleVar(value=1.0)
-        self.fade_in = tk.DoubleVar(value=2.0)
-        self.fade_out = tk.DoubleVar(value=3.0)
-        self.show_title = tk.BooleanVar(value=True)
-        self.show_bpm = tk.BooleanVar(value=True)
-        self.show_key = tk.BooleanVar(value=True)
-        self.show_camelot = tk.BooleanVar(value=False)
-        self.show_time = tk.BooleanVar(value=True)
-        self.show_progress = tk.BooleanVar(value=True)
-        self.text_font_size_var = tk.IntVar(value=42)
-        self.text_sub_font_size_var = tk.IntVar(value=28)
-        self.text_color_var = tk.StringVar(value="#ffffff")
-        self.text_align_var = tk.StringVar(value="center")
-        self.text_x_var = tk.DoubleVar(value=0.5)
-        self.text_y_var = tk.DoubleVar(value=0.5)
-        self.text_bold_var = tk.BooleanVar(value=False)
-        self.text_italic_var = tk.BooleanVar(value=False)
-        self.text_underline_var = tk.BooleanVar(value=False)
-        self.fx_bounce = tk.BooleanVar(value=False)
-        self.fx_shake = tk.BooleanVar(value=False)
-        self.fx_zoom = tk.BooleanVar(value=False)
-        self.fx_flash = tk.BooleanVar(value=False)
-        self.fx_bounce_i = tk.DoubleVar(value=1.03)
-        self.fx_shake_i = tk.DoubleVar(value=3)
-        self.fx_zoom_i = tk.DoubleVar(value=1.05)
-        self.fx_flash_i = tk.DoubleVar(value=0.3)
-        self.fx_crt = tk.BooleanVar(value=False)
-        self.fx_crt_intensity = tk.DoubleVar(value=1.0)
-        self.fx_crt_scanlines = tk.BooleanVar(value=True)
-        self.fx_crt_curvature = tk.DoubleVar(value=0.0)
-        self.fx_crt_chromatic = tk.DoubleVar(value=0.0)
-        self.fx_crt_vignette = tk.DoubleVar(value=0.0)
-        self.fx_crt_noise = tk.DoubleVar(value=0.0)
-        self.fx_crt_flicker = tk.DoubleVar(value=0.0)
-        self.resolution = tk.StringVar(value="1080p")
-        self.custom_width_var = tk.StringVar(value="1920")
-        self.custom_height_var = tk.StringVar(value="1080")
-        self.fps_var = tk.StringVar(value="24")
-        self.video_codec_var = tk.StringVar(value="자동")
-        self.audio_codec_var = tk.StringVar(value="aac")
-        self.video_bitrate_var = tk.StringVar(value="5000k")
-        self.audio_bitrate_var = tk.StringVar(value="192k")
-        self.loop_video_var = tk.BooleanVar(value=False)
-        self.loop_mode_var = tk.StringVar(value="반복 횟수")
-        self.loop_count_var = tk.StringVar(value="1")
-        self.loop_target_h_var = tk.StringVar(value="1")
-        self.loop_target_m_var = tk.StringVar(value="0")
-        self.loop_target_s_var = tk.StringVar(value="0")
-        self.normalize_loudness_var = tk.BooleanVar(value=True)
-        self.target_lufs_var = tk.StringVar(value="-14")
-        self._render_cancel_event = threading.Event()
-        self._render_job = None
-        self._last_render_dir = None
-        self._preview_render_lock = threading.Lock()
-        self._preview_frame_worker_active = False
-        self._preview_requested_t = None
-
-        def sec(t):
-            styled_label(sf, t, size=11, bold=True, bg=THEME['bg_card']).pack(fill=tk.X, pady=(12, 3), padx=12, anchor=tk.W)
-
-        def sep():
-            tk.Frame(sf, bg=THEME['separator'], height=1).pack(fill=tk.X, padx=12, pady=6)
-
-        def opt(label, var, opts):
-            f = tk.Frame(sf, bg=THEME['bg_card'])
-            f.pack(fill=tk.X, padx=12, pady=2)
-            if label: styled_label(f, label, size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-            m = styled_option_menu(f, var, opts)
-            m.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        def chk(label, var):
-            f = tk.Frame(sf, bg=THEME['bg_card'])
-            f.pack(fill=tk.X, padx=12, pady=2)
-            styled_checkbutton(f, label, var, bg=THEME['bg_card']).pack(side=tk.LEFT)
-
-        def sld(label, var, fr, to, res):
-            f = tk.Frame(sf, bg=THEME['bg_card'])
-            f.pack(fill=tk.X, padx=12, pady=2)
-            styled_label(f, label, size=10, bg=THEME['bg_card'], width=11).pack(side=tk.LEFT)
-            styled_scale(f, var, fr, to, res, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        sec("배경 이미지")
-        bf = tk.Frame(sf, bg=THEME['bg_card'])
-        bf.pack(fill=tk.X, padx=12, pady=(0, 3))
-        styled_entry(bf, textvariable=self.bg_image, width=20).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        styled_button(bf, "찾기", lambda: self._pick_bg(), padx=6).pack(side=tk.RIGHT, padx=(4, 0))
-        styled_label(sf, " 없으면 키 기반 그라디언트", size=8, color=THEME['fg_dimmer'], bg=THEME['bg_card']).pack(anchor=tk.W, padx=12)
-        opt("맞춤:", self.bg_fit_var, ["cover", "contain"])
-
-        def overlay_controls(title, path_var, x_var, y_var, width_var, opacity_var):
-            sep()
-            sec(title)
-            row = tk.Frame(sf, bg=THEME['bg_card'])
-            row.pack(fill=tk.X, padx=12, pady=2)
-            styled_entry(
-                row, textvariable=path_var, width=18
-            ).pack(side=tk.LEFT, fill=tk.X, expand=True)
-            styled_button(
-                row, "찾기", lambda: self._pick_overlay(path_var), padx=6
-            ).pack(side=tk.RIGHT, padx=(4, 0))
-            sld("X:", x_var, 0, 3840, 1)
-            sld("Y:", y_var, 0, 2160, 1)
-            sld("너비:", width_var, 16, 1920, 1)
-            sld("투명도:", opacity_var, 0, 1, 0.05)
-
-        overlay_controls(
-            "앨범 이미지", self.album_image_var,
-            self.album_x_var, self.album_y_var,
-            self.album_width_var, self.album_opacity_var,
-        )
-        overlay_controls(
-            "로고", self.logo_image_var,
-            self.logo_x_var, self.logo_y_var,
-            self.logo_width_var, self.logo_opacity_var,
-        )
-
-        sep()
-        sec("비주얼라이저")
-        self.viz_type.set("기본 막대형")
-        opt("타입:", self.viz_type, [
-            "기본 막대형", "미니멀 라인형", "스펙트럼형",
-            "원형", "중앙 방사형", "사용 안 함",
-        ])
-        opt("위치:", self.viz_pos, ["top", "center", "bottom"])
-        sld("바 개수:", self.viz_bars, 8, 256, 8)
-        sld("높이:", self.viz_height, 40, 300, 10)
-        sld("스무딩:", self.viz_smooth, 0, 0.95, 0.05)
-        sld("감쇠:", self.viz_decay, 0, 0.99, 0.01)
-        sld("막대 너비:", self.viz_bar_width, 0, 30, 1)
-        sld("막대 간격:", self.viz_bar_gap, 0, 16, 1)
-        sld("최소 높이:", self.viz_min_height, 0, 30, 1)
-        sld("감도:", self.viz_sensitivity, 0.1, 3.0, 0.1)
-        sld("투명도:", self.viz_opacity, 0.1, 1.0, 0.05)
-        sld("라운드:", self.viz_corner_radius, 0, 16, 1)
-        sld("글로우:", self.viz_glow, 0, 20, 1)
-        sld("선 굵기:", self.viz_line_width, 1, 12, 1)
-        chk("좌우 대칭", self.viz_mirror)
-        chk("방향 반전", self.viz_invert)
-        chk("그라디언트", self.viz_gradient)
-        viz_color_row = tk.Frame(sf, bg=THEME['bg_card'])
-        viz_color_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(
-            viz_color_row, "색상:", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        styled_entry(
-            viz_color_row, textvariable=self.viz_color, width=10
-        ).pack(side=tk.LEFT, padx=4)
-
-        self.viz_x_var = tk.DoubleVar(value=0)
-        self.viz_y_var = tk.DoubleVar(value=0)
-        self.viz_w_var = tk.IntVar(value=0)
-        sv1 = tk.Frame(sf, bg=THEME['bg_card'])
-        sv1.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(sv1, "X 오프셋:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(sv1, self.viz_x_var, 0, 3840, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        sv2 = tk.Frame(sf, bg=THEME['bg_card'])
-        sv2.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(sv2, "Y 오프셋:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(sv2, self.viz_y_var, 0, 2160, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        sv3 = tk.Frame(sf, bg=THEME['bg_card'])
-        sv3.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(sv3, "너비:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(sv3, self.viz_w_var, 0, 3840, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        sep()
-        sec("페이드")
-        sld("인 (초):", self.fade_in, 0, 10, 0.5)
-        sld("아웃 (초):", self.fade_out, 0, 10, 0.5)
-
-        sep()
-        sec("텍스트")
-        chk("제목", self.show_title)
-        chk("BPM", self.show_bpm)
-        chk("키", self.show_key)
-        chk("캠롯", self.show_camelot)
-        chk("타이머", self.show_time)
-        chk("프로그레스 바", self.show_progress)
-        sld("제목 크기:", self.text_font_size_var, 12, 160, 1)
-        sld("정보 크기:", self.text_sub_font_size_var, 10, 100, 1)
-        opt("정렬:", self.text_align_var, ["left", "center", "right"])
-        chk("일반 텍스트 굵게", self.text_bold_var)
-        chk("일반 텍스트 기울임", self.text_italic_var)
-        chk("일반 텍스트 밑줄", self.text_underline_var)
-        sld("텍스트 X:", self.text_x_var, 0, 1, 0.01)
-        sld("텍스트 Y:", self.text_y_var, 0, 1, 0.01)
-        text_color_row = tk.Frame(sf, bg=THEME['bg_card'])
-        text_color_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(
-            text_color_row, "색상:", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        styled_entry(
-            text_color_row, textvariable=self.text_color_var, width=10
-        ).pack(side=tk.LEFT, padx=4)
-
-        self.text_font_family_var = tk.StringVar(value=FONT_FAMILY)
-        tf_font = tk.Frame(sf, bg=THEME['bg_card'])
-        tf_font.pack(fill=tk.X, padx=12, pady=(6, 2))
-        styled_label(tf_font, "일반 폰트:", size=10, bg=THEME['bg_card']).pack(anchor=tk.W)
-        from font_combo import SearchableFontComboBox
-        SearchableFontComboBox(
-            tf_font, self.text_font_family_var, THEME, _font(9)
-        ).pack(fill=tk.X)
-
-        sep()
-        sec("커스텀 텍스트")
-        self.custom_text_var = tk.StringVar(value="")
-        cf1 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf1.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(cf1, "텍스트:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_entry(cf1, textvariable=self.custom_text_var, width=20).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        cf2 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf2.pack(fill=tk.X, padx=12, pady=2)
-        self.custom_x_var = tk.DoubleVar(value=0.5)
-        self.custom_y_var = tk.DoubleVar(value=0.3)
-        styled_label(cf2, "X 위치:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(cf2, self.custom_x_var, 0.0, 1.0, 0.01, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        cf3 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf3.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(cf3, "Y 위치:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(cf3, self.custom_y_var, 0.0, 1.0, 0.01, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        cf4 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf4.pack(fill=tk.X, padx=12, pady=2)
-        self.custom_font_size_var = tk.IntVar(value=36)
-        self.custom_bold_var = tk.BooleanVar(value=False)
-        self.custom_italic_var = tk.BooleanVar(value=False)
-        self.custom_underline_var = tk.BooleanVar(value=False)
-        styled_label(cf4, "폰트 크기:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_scale(cf4, self.custom_font_size_var, 8, 120, 1, bg=THEME['bg_card']).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
-
-        cf5 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf5.pack(fill=tk.X, padx=12, pady=2)
-        styled_checkbutton(cf5, "볼드", self.custom_bold_var, bg=THEME['bg_card']).pack(side=tk.LEFT, padx=(0,8))
-        styled_checkbutton(cf5, "기울임", self.custom_italic_var, bg=THEME['bg_card']).pack(side=tk.LEFT, padx=(0,8))
-        styled_checkbutton(cf5, "밑줄", self.custom_underline_var, bg=THEME['bg_card']).pack(side=tk.LEFT)
-
-        self.custom_color_var = tk.StringVar(value="#ffffff")
-        cf6 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf6.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(cf6, "색상:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_entry(cf6, textvariable=self.custom_color_var, width=10).pack(side=tk.LEFT, padx=4)
-
-        self.custom_font_family_var = tk.StringVar(value=FONT_FAMILY)
-        cf_font = tk.Frame(sf, bg=THEME['bg_card'])
-        cf_font.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(cf_font, "커스텀 폰트:", size=10, bg=THEME['bg_card']).pack(anchor=tk.W)
-        SearchableFontComboBox(
-            cf_font, self.custom_font_family_var, THEME, _font(9)
-        ).pack(fill=tk.X)
-
-        self.custom_affects_fx_var = tk.BooleanVar(value=True)
-        cf7 = tk.Frame(sf, bg=THEME['bg_card'])
-        cf7.pack(fill=tk.X, padx=12, pady=2)
-        styled_checkbutton(cf7, "이펙트(흔들림/페이드) 영향 받음", self.custom_affects_fx_var, bg=THEME['bg_card']).pack(side=tk.LEFT)
-
-        sep()
-        sec("비트 이펙트")
-        chk("바운스 (위아래 통통)", self.fx_bounce)
-        sld("  강도:", self.fx_bounce_i, 1.01, 1.15, 0.01)
-        chk("쉐이크 (화면 흔들림)", self.fx_shake)
-        sld("  강도:", self.fx_shake_i, 1, 20, 1)
-        chk("줌 (확대/축소)", self.fx_zoom)
-        sld("  강도:", self.fx_zoom_i, 1.01, 1.20, 0.01)
-        chk("플래시 (번쩍)", self.fx_flash)
-        sld("  강도:", self.fx_flash_i, 0.05, 0.8, 0.05)
-        sep()
-        sec("CRT 효과")
-        chk("CRT 효과 켜기", self.fx_crt)
-        sld("  전체 강도:", self.fx_crt_intensity, 0.1, 2.0, 0.1)
-        chk("  스캔라인", self.fx_crt_scanlines)
-        sld("  왜곡:", self.fx_crt_curvature, 0.0, 5.0, 0.5)
-        sld("  채도 분리:", self.fx_crt_chromatic, 0.0, 5.0, 0.5)
-        sld("  비네트:", self.fx_crt_vignette, 0.0, 3.0, 0.5)
-        sld("  노이즈:", self.fx_crt_noise, 0.0, 3.0, 0.5)
-        sld("  깜빡임:", self.fx_crt_flicker, 0.0, 3.0, 0.5)
-
-        styled_button(sf, "미리보기 새로고침", self._refresh_canvas_preview, "primary", padx=8).pack(padx=12, pady=4, anchor=tk.W)
-
-        sep()
-        sec("해상도")
-        opt("", self.resolution, [
-            "720p", "1080p", "4k", "세로 1080x1920",
-            "정사각 1080x1080", "사용자 지정",
-        ])
-        custom_res_row = tk.Frame(sf, bg=THEME['bg_card'])
-        custom_res_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(
-            custom_res_row, "사용자 지정:", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        styled_entry(
-            custom_res_row, textvariable=self.custom_width_var, width=6
-        ).pack(side=tk.LEFT, padx=(6, 2))
-        styled_label(
-            custom_res_row, "×", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        styled_entry(
-            custom_res_row, textvariable=self.custom_height_var, width=6
-        ).pack(side=tk.LEFT, padx=2)
-        opt("FPS:", self.fps_var, ["8", "12", "24", "30"])
-        opt("영상 코덱:", self.video_codec_var, [
-            "자동", "CPU (libx264)", "NVIDIA (h264_nvenc)",
-            "Intel (h264_qsv)", "AMD (h264_amf)",
-        ])
-        opt("오디오 코덱:", self.audio_codec_var, ["aac", "libmp3lame"])
-        bitrate_row = tk.Frame(sf, bg=THEME['bg_card'])
-        bitrate_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(
-            bitrate_row, "비트레이트:", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        styled_entry(
-            bitrate_row, textvariable=self.video_bitrate_var, width=8
-        ).pack(side=tk.LEFT, padx=(6, 2))
-        styled_label(
-            bitrate_row, "영상", size=9, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        styled_entry(
-            bitrate_row, textvariable=self.audio_bitrate_var, width=8
-        ).pack(side=tk.LEFT, padx=(8, 2))
-        styled_label(
-            bitrate_row, "오디오", size=9, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-
-        sep()
-        sec("완성 영상 반복")
-        chk("완성된 Mix 전체를 반복", self.loop_video_var)
-        opt("반복 방식:", self.loop_mode_var, ["반복 횟수", "목표 재생시간"])
-        loop_count_row = tk.Frame(sf, bg=THEME['bg_card'])
-        loop_count_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(
-            loop_count_row, "반복 횟수:", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        self.loop_count_entry = styled_entry(
-            loop_count_row, textvariable=self.loop_count_var, width=7
-        )
-        self.loop_count_entry.pack(side=tk.LEFT, padx=(6, 4))
-        styled_label(
-            loop_count_row, "회", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-
-        loop_target_row = tk.Frame(sf, bg=THEME['bg_card'])
-        loop_target_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(
-            loop_target_row, "목표시간:", size=10, bg=THEME['bg_card']
-        ).pack(side=tk.LEFT)
-        self.loop_target_entries = []
-        for variable, unit in (
-            (self.loop_target_h_var, "시간"),
-            (self.loop_target_m_var, "분"),
-            (self.loop_target_s_var, "초"),
-        ):
-            entry = styled_entry(
-                loop_target_row, textvariable=variable, width=4
-            )
-            entry.pack(side=tk.LEFT, padx=(5, 2))
-            self.loop_target_entries.append(entry)
-            styled_label(
-                loop_target_row, unit, size=9, bg=THEME['bg_card']
-            ).pack(side=tk.LEFT)
-
-        self.loop_summary_label = styled_label(
-            sf, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card']
-        )
-        self.loop_summary_label.pack(fill=tk.X, anchor=tk.W, padx=12, pady=(4, 2))
-        styled_label(
-            sf,
-            "목표시간 방식도 마지막 반복을 자르지 않고 전체 재생합니다.",
-            size=8, color=THEME['fg_dimmer'], bg=THEME['bg_card'],
-        ).pack(anchor=tk.W, padx=12, pady=(0, 4))
-        for variable in (
-            self.loop_video_var, self.loop_mode_var, self.loop_count_var,
-            self.loop_target_h_var, self.loop_target_m_var,
-            self.loop_target_s_var,
-        ):
-            variable.trace_add("write", lambda *_: self._update_repeat_summary())
-
-        sep()
-        sec("오디오 마스터링")
-        chk("스트리밍 믹싱 후 음량 정규화", self.normalize_loudness_var)
-        loudness_row = tk.Frame(sf, bg=THEME['bg_card'])
-        loudness_row.pack(fill=tk.X, padx=12, pady=2)
-        styled_label(loudness_row, "목표 LUFS:", size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        styled_entry(loudness_row, textvariable=self.target_lufs_var, width=7).pack(side=tk.LEFT, padx=6)
-        styled_label(
-            sf, "YouTube 권장 기본값: -14 LUFS / true peak -1.5 dBTP",
-            size=8, color=THEME['fg_dimmer'], bg=THEME['bg_card'],
-        ).pack(anchor=tk.W, padx=12, pady=(0, 4))
-
-        right = tk.Frame(main, bg=THEME['bg_card'])
-        main.add(right, minsize=400)
-
-        styled_label(right, "미리보기", size=12, bold=True, bg=THEME['bg_card']).pack(pady=(12, 4))
-        self.preview_canvas = tk.Canvas(right, bg=THEME['bg'], highlightthickness=1,
-                                        highlightbackground=THEME['separator'])
-        self.preview_canvas.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 4))
-        self._preview_photo = None
-        self._last_preview_pil_frame = None
-        self.preview_canvas.bind("<Configure>", self._on_preview_canvas_resize)
-
-        prev_ctrl = tk.Frame(right, bg=THEME['bg_card'])
-        prev_ctrl.pack(fill=tk.X, padx=12, pady=(0, 4))
-        self.preview_play_btn = styled_button(prev_ctrl, "▶ 실시간 재생", self._preview_render_video, "primary", padx=6)
-        self.preview_play_btn.pack(side=tk.RIGHT, padx=2)
-        styled_button(prev_ctrl, "새로고침", self._refresh_canvas_preview, padx=6).pack(side=tk.RIGHT, padx=2)
-        self._preview_status_label = styled_label(prev_ctrl, "설정 변경 시 자동 반영", size=9, color=THEME['fg_dim'], bg=THEME['bg_card'])
-        self._preview_status_label.pack(side=tk.LEFT)
-
-        scrub_frame = tk.Frame(right, bg=THEME['bg_card'])
-        scrub_frame.pack(fill=tk.X, padx=12, pady=(0, 4))
-        self.scrub_var = tk.DoubleVar(value=0)
-        self.scrub_scale = ttk.Scale(scrub_frame, from_=0, to=100, orient=tk.HORIZONTAL,
-                                      variable=self.scrub_var, command=self._on_scrub_drag)
-        self.scrub_scale.pack(fill=tk.X, side=tk.LEFT, expand=True)
-        self.scrub_scale.state(['disabled'])
-        self._live_renderer = None
-        self._live_duration = 0.0
-        self._scrub_playing = False
-        self._scrub_after_id = None
-        self._programmatic_scrub = False
-        self._preview_settings_after_id = None
-        self._preview_generation = 0
-
-        sep_r = tk.Frame(right, bg=THEME['separator'], height=1)
-        sep_r.pack(fill=tk.X, padx=12, pady=6)
-
-        styled_label(right, "렌더링 대기열", size=12, bold=True, bg=THEME['bg_card']).pack(pady=(4, 6))
-
-        self.queue_listbox = styled_listbox(right)
-        self.queue_listbox.configure(height=10)
-        self.queue_listbox.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 8))
-
-        self.render_btn = styled_button(right, "전체 렌더링 시작", self._start_render, "primary", padx=10, pady=8)
-        self.render_btn.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.cancel_render_btn = styled_button(
-            right, "렌더링 취소", self._cancel_render, "danger", padx=10, pady=6
-        )
-        self.cancel_render_btn.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.cancel_render_btn.configure(state=tk.DISABLED)
-        self.retry_render_btn = styled_button(
-            right, "미완료 Mix 재시도", self._retry_render, padx=10, pady=6
-        )
-        self.retry_render_btn.pack(fill=tk.X, padx=12, pady=(0, 6))
-        self.retry_render_btn.configure(state=tk.DISABLED)
-        self.render_status = styled_label(right, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card'])
-        self.render_status.pack(padx=12, anchor=tk.W)
-        self.render_progress_frame = tk.Frame(right, bg=THEME['bg_card'])
-        self.render_progress_frame.pack(fill=tk.X, padx=12, pady=(4, 8))
-        self.render_progress_canvas = tk.Canvas(self.render_progress_frame, bg=THEME['bg_hover'],
-                                                 height=12, highlightthickness=0)
-        self.render_progress_canvas.pack(fill=tk.X)
-        self.render_progress_label = styled_label(self.render_progress_frame, "", size=8,
-                                                   color=THEME['fg_dim'], bg=THEME['bg_card'])
-        self.render_progress_label.pack(anchor=tk.W)
-
-        # sf 안의 모든 자식 위젯(버튼/슬라이더/드롭다운 등)에도 같은 마우스휠
-        # 핸들러를 재귀적으로 걸어준다. 안 그러면 canvas의 <Leave>가 발생해
-        # (커서가 자식 위젯으로 넘어가는 순간) unbind_all이 실행되어, 컨트롤
-        # 위에서는 스크롤이 먹지 않는 문제가 있었다.
-        def _bind_wheel_recursive(widget):
-            widget.bind("<MouseWheel>", _sf_mousewheel)
-            widget.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _sf_mousewheel))
-            widget.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
-            for child in widget.winfo_children():
-                _bind_wheel_recursive(child)
-
-        _bind_wheel_recursive(sf)
-        preview_variables = [
-            value for name, value in vars(self).items()
-            if isinstance(value, tk.Variable)
-            and name not in {
-                'scrub_var', 'loop_video_var', 'loop_mode_var',
-                'loop_count_var', 'loop_target_h_var', 'loop_target_m_var',
-                'loop_target_s_var', 'normalize_loudness_var',
-                'target_lufs_var', 'fps_var', 'video_codec_var',
-                'audio_codec_var', 'video_bitrate_var',
-                'audio_bitrate_var',
-            }
-        ]
-        for variable in preview_variables:
-            variable.trace_add(
-                "write", lambda *_: self._schedule_preview_refresh()
-            )
-
-    def _schedule_preview_refresh(self):
-        if self._preview_settings_after_id:
-            try:
-                self.after_cancel(self._preview_settings_after_id)
-            except tk.TclError:
-                pass
-        self._preview_settings_after_id = self.after(
-            180, self._apply_scheduled_preview_refresh
-        )
-
-    def _apply_scheduled_preview_refresh(self):
-        self._preview_settings_after_id = None
-        if (
-            self.winfo_exists() and self.winfo_ismapped()
-            and self.app.current_stage == 4
-        ):
-            self._refresh_canvas_preview()
-
-    def on_hide(self):
-        self._preview_generation += 1
-        self._preview_requested_t = None
-        self._stop_scrub_play()
-        if self._preview_settings_after_id:
-            try:
-                self.after_cancel(self._preview_settings_after_id)
-            except tk.TclError:
-                pass
-            self._preview_settings_after_id = None
-
-    def _get_repeat_plan(self, base_duration=None):
-        from repeat_settings import (
-            MODE_COUNT, MODE_TARGET, build_repeat_plan, hms_to_seconds,
-            estimate_group_duration,
-        )
-        if base_duration is None:
-            if 0 <= self.selected_group < len(self.app.video_groups):
-                base_duration = estimate_group_duration(
-                    self.app.video_groups[self.selected_group]
-                )
-            else:
-                base_duration = 0
-        mode = (
-            MODE_TARGET
-            if self.loop_mode_var.get() == "목표 재생시간"
-            else MODE_COUNT
-        )
-        count = int(self.loop_count_var.get() or "1")
-        target = hms_to_seconds(
-            self.loop_target_h_var.get() or "0",
-            self.loop_target_m_var.get() or "0",
-            self.loop_target_s_var.get() or "0",
-        )
-        return build_repeat_plan(
-            base_duration,
-            enabled=self.loop_video_var.get(),
-            mode=mode,
-            repeat_count=count,
-            target_seconds=target,
-        )
-
-    def _update_repeat_summary(self):
-        if not hasattr(self, "loop_summary_label"):
-            return
-        target_mode = self.loop_mode_var.get() == "목표 재생시간"
-        self.loop_count_entry.configure(
-            state=tk.DISABLED if target_mode else tk.NORMAL
-        )
-        for entry in self.loop_target_entries:
-            entry.configure(state=tk.NORMAL if target_mode else tk.DISABLED)
-        try:
-            plan = self._get_repeat_plan()
-            from repeat_settings import format_duration
-            if not self.loop_video_var.get():
-                text = (
-                    f"플레이리스트 1회 길이: "
-                    f"{format_duration(plan.base_seconds)} · 반복 사용 안 함"
-                )
-            elif target_mode:
-                text = (
-                    f"1회 길이 {format_duration(plan.base_seconds)} · "
-                    f"예상 {plan.repeat_count}회 · "
-                    f"실제 {format_duration(plan.output_seconds)} · "
-                    f"초과 {format_duration(plan.overflow_seconds)}"
-                )
-            else:
-                text = (
-                    f"1회 길이 {format_duration(plan.base_seconds)} · "
-                    f"{plan.repeat_count}회 · "
-                    f"예상 출력 {format_duration(plan.output_seconds)}"
-                )
-        except (TypeError, ValueError):
-            text = "반복 설정에 0 이상의 정수를 입력해 주세요."
-        self.loop_summary_label.configure(text=text)
-
-    def refresh(self):
-        self.queue_listbox.delete(0, tk.END)
-        for i, g in enumerate(self.app.video_groups):
-            dur = g.get('total_duration', 0)
-            n = len(g.get('tracks', []))
-            self.queue_listbox.insert(tk.END, f"Mix {i+1}: {n}곡, {int(dur)}초 ({int(dur//60)}분 {int(dur%60):02d}초)  [대기]")
-
-        # 영상이 2개 이상이면 미리보기 대상을 고를 수 있는 탭을 보여준다.
-        # (예전엔 항상 video_groups[0]만 미리보기/편집 대상이라, 2번째 영상부터는
-        # 화면 상에서 아예 손댈 방법이 없었음)
-        if 0 <= self.selected_group < len(self.app.video_groups):
-            idx = self.selected_group
-        else:
-            idx = 0
-            self.selected_group = 0
-        populate_group_tabs(self.tabs_container, self.app.video_groups, idx, self._set_group)
-
-        # Stage0(프로젝트+가져오기)에서 음악과 함께 드래그앤드롭한 이미지가 있으면
-        # 배경 이미지로 자동 연결한다. 지금까지는 이미지 파일이 트랙 목록에는
-        # 추가되지만 어디에서도 배경 설정으로 이어지지 않아서, 사용자가 매번
-        # "찾아보기"로 같은 파일을 다시 지정해야 했음. 사용자가 이미 배경을
-        # 직접 지정/변경한 경우(비어있지 않음)는 덮어쓰지 않는다.
-        if not self.bg_image.get():
-            for t in self.app.tracks:
-                if t.filetype == "image" and os.path.isfile(t.filepath):
-                    self.bg_image.set(t.filepath)
-                    for vg in self.app.video_groups:
-                        if not vg.get('bg_image'):
-                            vg['bg_image'] = t.filepath
-                    break
-        self._update_repeat_summary()
-
-    def _sync_group_bg(self, save=True):
-        """그룹 전환 시 bg_image를 UI ↔ video_group dict 사이로 동기화."""
-        if self.selected_group < 0 or self.selected_group >= len(self.app.video_groups):
-            return
-        g = self.app.video_groups[self.selected_group]
-        if save:
-            g['bg_image'] = self.bg_image.get()
-        else:
-            self.bg_image.set(g.get('bg_image', ''))
-
-    def _set_group(self, idx):
-        if idx == self.selected_group:
-            return
-        self._sync_group_bg(save=True)
-        self.selected_group = idx
-        populate_group_tabs(self.tabs_container, self.app.video_groups, idx, self._set_group)
-        self._sync_group_bg(save=False)
-        self._stop_scrub_play()
-        self._preview_generation += 1
-        preview_generation = self._preview_generation
-        self._live_renderer = None
-        self._live_duration = 0.0
-        self.scrub_var.set(0)
-        self.scrub_scale.state(['disabled'])
-        self.preview_canvas.delete("all")
-        self._last_preview_pil_frame = None
-        self._preview_status_label.configure(text=f"Mix {idx+1} 선택됨 — 새로고침을 눌러 미리보기")
-        self._update_repeat_summary()
-
-    def _pick_bg(self):
-        p = filedialog.askopenfilename(filetypes=[("이미지", " ".join(f"*{e}" for e in IMAGE_EXTS))])
-        if p: self.bg_image.set(p)
-
-    def _pick_overlay(self, variable):
-        path = filedialog.askopenfilename(
-            filetypes=[("이미지", " ".join(f"*{e}" for e in IMAGE_EXTS))]
-        )
-        if path:
-            variable.set(path)
-
-    def _collect_config(self):
-        viz_type_map = {
-            "기본 막대형": "eq_bars",
-            "미니멀 라인형": "waveform",
-            "스펙트럼형": "spectrum",
-            "원형": "circles",
-            "중앙 방사형": "radial",
-            "사용 안 함": "none",
-        }
-        return {
-            "background": {
-                "image": self.bg_image.get() or None, "opacity": 1.0,
-                "blur": 0, "darken": 0.0, "fit": self.bg_fit_var.get(),
-            },
-            "overlays": {
-                "album": {
-                    "image": self.album_image_var.get() or None,
-                    "x": int(self.album_x_var.get()),
-                    "y": int(self.album_y_var.get()),
-                    "width": int(self.album_width_var.get()),
-                    "opacity": self.album_opacity_var.get(),
-                },
-                "logo": {
-                    "image": self.logo_image_var.get() or None,
-                    "x": int(self.logo_x_var.get()),
-                    "y": int(self.logo_y_var.get()),
-                    "width": int(self.logo_width_var.get()),
-                    "opacity": self.logo_opacity_var.get(),
-                },
-            },
-            "visualizer": {"type": viz_type_map.get(self.viz_type.get(), self.viz_type.get()), "position": self.viz_pos.get(), "color": self.viz_color.get(),
-                           "opacity": self.viz_opacity.get(), "bar_count": int(self.viz_bars.get()), "height": int(self.viz_height.get()),
-                           "smoothing": self.viz_smooth.get(),
-                           "mirror": self.viz_mirror.get(),
-                           "invert": self.viz_invert.get(),
-                           "gradient": self.viz_gradient.get(),
-                           "bar_width": int(self.viz_bar_width.get()),
-                           "bar_gap": int(self.viz_bar_gap.get()),
-                           "min_height": int(self.viz_min_height.get()),
-                           "sensitivity": self.viz_sensitivity.get(),
-                           "corner_radius": int(self.viz_corner_radius.get()),
-                           "decay": self.viz_decay.get(),
-                           "glow": int(self.viz_glow.get()),
-                           "line_width": int(self.viz_line_width.get()),
-                           "x": int(self.viz_x_var.get()), "y": int(self.viz_y_var.get()),
-                           "width": int(self.viz_w_var.get()), "height_override": 0},
-            "text": {"show_title": self.show_title.get(), "show_bpm": self.show_bpm.get(), "show_key": self.show_key.get(),
-                     "show_camelot": self.show_camelot.get(), "show_time": self.show_time.get(), "position": "center",
-                     "font_size": int(self.text_font_size_var.get()),
-                     "sub_font_size": int(self.text_sub_font_size_var.get()),
-                     "color": self.text_color_var.get(),
-                     "align": self.text_align_var.get(),
-                     "x": self.text_x_var.get(),
-                     "y": self.text_y_var.get(),
-                     "bold": self.text_bold_var.get(),
-                     "italic": self.text_italic_var.get(),
-                     "underline": self.text_underline_var.get(),
-                     "shadow": True, "shadow_color": "#000000", "shadow_offset": 3,
-                     "text_font_family": self.text_font_family_var.get(),
-                     "custom_text": self.custom_text_var.get(),
-                     "custom_x": self.custom_x_var.get(), "custom_y": self.custom_y_var.get(),
-                     "custom_font_size": int(self.custom_font_size_var.get()),
-                     "custom_bold": self.custom_bold_var.get(),
-                     "custom_italic": self.custom_italic_var.get(),
-                     "custom_underline": self.custom_underline_var.get(),
-                      "custom_color": self.custom_color_var.get(),
-                      "custom_font_family": self.custom_font_family_var.get(),
-                      "custom_affects_by_effects": self.custom_affects_fx_var.get()},
-            "progress_bar": {"show": self.show_progress.get(), "position": "bottom", "height": 4,
-                              "color": "#ffffff", "background_color": "#333333", "margin": 30},
-            "fade": {"fade_in_duration": self.fade_in.get(), "fade_out_duration": self.fade_out.get()},
-            "effects": {"bounce": self.fx_bounce.get(), "bounce_intensity": self.fx_bounce_i.get(),
-                        "shake": self.fx_shake.get(), "shake_intensity": self.fx_shake_i.get(),
-                        "zoom": self.fx_zoom.get(), "zoom_intensity": self.fx_zoom_i.get(),
-                        "flash": self.fx_flash.get(), "flash_intensity": self.fx_flash_i.get(),
-                        "crt": self.fx_crt.get(), "crt_intensity": self.fx_crt_intensity.get(),
-                        "crt_scanlines": self.fx_crt_scanlines.get(),
-                        "crt_curvature": self.fx_crt_curvature.get(),
-                        "crt_chromatic": self.fx_crt_chromatic.get(),
-                        "crt_vignette": self.fx_crt_vignette.get(),
-                        "crt_noise": self.fx_crt_noise.get(),
-                        "crt_flicker": self.fx_crt_flicker.get()},
-        }
-
-    def _preview_effects(self):
-        self._refresh_canvas_preview()
-
-    def _preview_done(self, path):
-        pass
-
-    def _hex_to_rgb(self, h):
-        h = h.lstrip('#')
-        return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
-
-    def _make_preview_bg(self, w, h, key='C', mode='major'):
-        key_colors = {
-            'C': (60, 60, 90), 'D': (50, 70, 80), 'E': (70, 50, 80),
-            'F': (50, 80, 60), 'G': (80, 60, 50), 'A': (80, 50, 70),
-            'B': (60, 70, 70),
-        }
-        base = key_colors.get(key, (50, 50, 70))
-        if mode == 'minor':
-            base = tuple(max(0, c - 15) for c in base)
-
-        bg = _PIL_Image.new('RGB', (w, h), base)
-        draw = _PIL_ImageDraw.Draw(bg)
-        for y in range(h):
-            alpha = int(60 * (y / h))
-            draw.line([(0, y), (w, y)], fill=tuple(min(255, c + alpha) for c in base))
-        return bg, draw
-
-    def _refresh_canvas_preview(self):
-        """설정을 다시 수집해서 실제 렌더링 코드(LiveFrameRenderer)로 미리보기를
-        갱신한다. 예전엔 이 버튼이 random 값으로 그리는 가짜 미리보기를 그렸는데,
-        그러면 실시간 재생 화면과 따로 놀아서 "설정을 바꿔도 반영이 안 된다"는
-        문제가 있었음. 이제는 실시간 재생과 완전히 같은 렌더러를 공유한다."""
-        config = self._collect_config()
-
-        if not self.app.video_groups:
-            cw = self.preview_canvas.winfo_width() or 640
-            ch = self.preview_canvas.winfo_height() or 360
-            bg, draw = self._make_preview_bg(max(cw, 320), max(ch, 180))
-            draw.text((20, 20), "먼저 분배를 실행하세요", fill=(220, 220, 220))
-            self._show_pil_frame_fit(bg)
-            self._preview_status_label.configure(text="분배 결과 없음")
-            return
-
-        idx = self.selected_group if 0 <= self.selected_group < len(self.app.video_groups) else 0
-
-        if self._live_renderer:
-            # 오디오는 그대로 두고 시각 설정만 즉시 반영 (오디오 재믹싱 없어서 빠름)
-            with self._preview_render_lock:
-                self._live_renderer.reconfigure(config)
-            self._render_scrub_frame(self.scrub_var.get())
-            self._preview_status_label.configure(text=f"설정 반영됨 (Mix {idx+1})")
-        else:
-            # 아직 준비된 렌더러가 없으면(최초 1회) 오디오 믹싱부터 진행
-            self._preview_render_video()
-
-    def _selected_resolution(self):
-        resolution_map = {
-            "720p": (1280, 720),
-            "1080p": (1920, 1080),
-            "4k": (3840, 2160),
-            "세로 1080x1920": (1080, 1920),
-            "정사각 1080x1080": (1080, 1080),
-        }
-        if self.resolution.get() != "사용자 지정":
-            return resolution_map.get(self.resolution.get(), (1920, 1080))
-        width = int(self.custom_width_var.get())
-        height = int(self.custom_height_var.get())
-        if not (64 <= width <= 7680 and 64 <= height <= 7680):
-            raise ValueError("사용자 지정 해상도는 각 변이 64~7680이어야 합니다.")
-        # Most H.264 encoders require even dimensions.
-        return width - width % 2, height - height % 2
-
-    def _preview_render_video(self):
-        if not self.app.video_groups:
-            messagebox.showwarning("경고", "먼저 분배를 실행하세요.")
-            return
-
-        idx = self.selected_group if 0 <= self.selected_group < len(self.app.video_groups) else 0
-        g = self.app.video_groups[idx]
-        tracks = g.get('tracks', [])
-        if not tracks:
-            return
-
-        config = self._collect_config()
-        config['clips'] = g.get('clips', [])
-        config['clip_enabled'] = g.get('clip_enabled', False)
-        config['clip_interval'] = g.get('clip_interval', 1.0)
-        config['clip_interval_unit'] = g.get('clip_interval_unit', '초')
-        config['clip_random'] = g.get('clip_random', False)
-        config['clip_random_base'] = g.get('clip_random_base', 'BPM')
-        # Render in the actual output coordinate system. The preview canvas
-        # scales the completed frame as one unit, preserving every size,
-        # position, radius and stroke exactly.
-        try:
-            pw, ph = self._selected_resolution()
-        except ValueError as error:
-            messagebox.showwarning("해상도 오류", str(error))
-            return
-
-        analyses = []
-        tracks_data = []
-        for t in tracks:
-            if not t.get('analysis'):
-                continue
-            fp = t.get('filepath', '') or (t.get('track', {}).get('filepath', '') if isinstance(t.get('track'), dict) else getattr(t.get('track'), 'filepath', ''))
-            if not fp:
-                continue
-            samples, sr = _load_audio_pydub(fp)
-            ts_val = t.get('trim_start', 0)
-            te_val = t.get('trim_end', 0)
-            dur_val = t.get('duration', len(samples) / sr)
-            if te_val <= 0:
-                te_val = dur_val
-            if ts_val > 0 or te_val < dur_val:
-                s_s = int(ts_val * sr)
-                e_s = int(te_val * sr)
-                samples = samples[s_s:e_s]
-            tracks_data.append((samples, sr))
-            analyses.append(t['analysis'])
-
-        if not tracks_data:
-            return
-
-        self._stop_scrub_play()
-        self.preview_play_btn.configure(state=tk.DISABLED, text="준비 중...")
-        self._preview_status_label.configure(text="오디오 믹싱 중...")
-        self._preview_generation += 1
-        preview_generation = self._preview_generation
-        self._show_preview_loading()
-
-        _log_path = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_preview.log")
-        def _plog(msg):
-            try:
-                with open(_log_path, "a", encoding="utf-8") as _lf:
-                    _lf.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-            except Exception:
-                pass
-
-        def run():
-            _plog(f"=== 미리보기 시작 ===")
-            _plog(f"analyses={len(analyses)}, tracks_data={len(tracks_data)}, pw={pw}, ph={ph}")
-            try:
-                import tempfile
-                tmp_audio = os.path.join(tempfile.gettempdir(), "_livepreview_audio.wav")
-                _plog("create_mixed_audio 호출...")
-                _, dur, timestamps = _create_mixed_audio(analyses, tracks_data, tmp_audio, 4.0)
-                _plog(f"오디오 믹싱 완료: dur={dur}, timestamps={len(timestamps)}")
-
-                _plog("LiveFrameRenderer 생성 중...")
-                renderer = video_gen.LiveFrameRenderer(
-                    analyses, pw, ph, dur,
-                    timestamps=timestamps, crossfade_duration=4.0,
-                    config_dict=config,
-                )
-                _plog("LiveFrameRenderer 생성 완료")
-
-                self.after(
-                    0,
-                    lambda: self._on_live_renderer_ready(
-                        renderer, dur, preview_generation
-                    ),
-                )
-            except Exception as e:
-                import traceback
-                _plog(f"ERROR: {e}\n{traceback.format_exc()}")
-                self.after(0, lambda: (
-                    self._hide_preview_loading(),
-                    messagebox.showerror("오류", f"미리보기 준비 실패:\n{e}"),
-                    self.preview_play_btn.configure(state=tk.NORMAL, text="▶ 실시간 재생"),
-                    self._preview_status_label.configure(text="실패"),
-                ))
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _on_live_renderer_ready(self, renderer, duration, generation=None):
-        if (
-            generation is not None
-            and generation != self._preview_generation
-        ):
-            return
-        self._hide_preview_loading()
-        self._live_renderer = renderer
-        self._live_duration = duration
-        self.scrub_scale.state(['!disabled'])
-        self.scrub_scale.configure(to=max(duration, 0.1))
-        self.scrub_var.set(0)
-        self._render_scrub_frame(0.0)
-        idx = self.selected_group if 0 <= self.selected_group < len(self.app.video_groups) else 0
-        self._preview_status_label.configure(text=f"준비됨 (Mix {idx+1}, 총 {duration:.1f}초) — 슬라이더로 탐색 또는 재생")
-        self.preview_play_btn.configure(state=tk.NORMAL, text="■ 정지", command=self._stop_scrub_play)
-        self._start_scrub_play()
-
-    def _show_preview_loading(self):
-        """미리보기 캔버스 위에 '로딩 중...' Label 오버레이 표시."""
-        if getattr(self, '_preview_loading_label', None) is None:
-            self._preview_loading_label = tk.Label(
-                self.preview_canvas, text="로딩 중...",
-                font=("D2Coding", 14),
-                fg=THEME.get('fg', '#cccccc'),
-                bg=THEME.get('bg', '#2b2d31'),
-            )
-        self._hide_preview_loading()
-        self.preview_canvas.delete("all")
-        lw, lh = 200, 80
-        cw = max(self.preview_canvas.winfo_width(), 640)
-        ch = max(self.preview_canvas.winfo_height(), 360)
-        x = (cw - lw) // 2
-        y = (ch - lh) // 2 - 10
-        self._preview_loading_label.place(x=x, y=y, width=lw, height=lh)
-        bar_w, bar_h = min(300, cw - 80), 6
-        bx = (cw - bar_w) // 2
-        by = y + lh + 10
-        self.preview_canvas.create_rectangle(bx, by, bx + bar_w, by + bar_h,
-                                             fill=THEME.get('bg_hover', '#333'), outline='')
-        self._preview_loading_bar = (bx, by, bar_w, bar_h)
-        self._preview_loading_offset = [0.0]
-        self.preview_canvas.update_idletasks()
-        self._animate_preview_loading()
-
-    def _animate_preview_loading(self):
-        """프로그레스 바 애니메이션 (좌→우 반복)."""
-        if not getattr(self, '_preview_loading_bar', None):
-            return
-        bx, by, bar_w, bar_h = self._preview_loading_bar
-        self.preview_canvas.delete("_loading_bar")
-        offset = self._preview_loading_offset[0]
-        seg = bar_w * 0.3
-        x1 = bx + int(offset * bar_w) % bar_w
-        x2 = min(x1 + seg, bx + bar_w)
-        self.preview_canvas.create_rectangle(x1, by, x2, by + bar_h,
-                                             fill=THEME.get('accent', '#5865f2'), outline='',
-                                             tags="_loading_bar")
-        self._preview_loading_offset[0] += 0.04
-        self._preview_loading_after = self.after(30, self._animate_preview_loading)
-
-    def _hide_preview_loading(self):
-        """로딩 Label 및 애니메이션 제거."""
-        if getattr(self, '_preview_loading_bar', None):
-            self.preview_canvas.delete("_loading_bar")
-            self._preview_loading_bar = None
-        if getattr(self, '_preview_loading_after', None):
-            self.after_cancel(self._preview_loading_after)
-            self._preview_loading_after = None
-        if getattr(self, '_preview_loading_label', None):
-            self._preview_loading_label.place_forget()
-
-    def _show_pil_frame_fit(self, pil_img):
-        """PIL 이미지를 캔버스 크기에 맞춰, 비율을 망가뜨리지 않고(가로가 남으면
-        가로가, 세로가 남으면 세로가 비도록) 가운데 정렬해서 그린다."""
-        self._last_preview_pil_frame = pil_img
-        cw = self.preview_canvas.winfo_width()
-        ch = self.preview_canvas.winfo_height()
-        if cw < 10 or ch < 10:
-            return
-        img_w, img_h = pil_img.size
-        scale = min(cw / img_w, ch / img_h)
-        new_w = max(1, int(img_w * scale))
-        new_h = max(1, int(img_h * scale))
-        resized = pil_img.resize((new_w, new_h), _PIL_Image.LANCZOS)
-        self._preview_photo = _PIL_ImageTk.PhotoImage(resized)
-        self.preview_canvas.delete("all")
-        self.preview_canvas.create_image(cw // 2, ch // 2, image=self._preview_photo)
-
-    def _on_preview_canvas_resize(self, event):
-        # 창 크기가 바뀌면 마지막으로 그렸던 프레임을 새 캔버스 크기에 맞춰 다시 표시
-        if self._last_preview_pil_frame is not None:
-            self._show_pil_frame_fit(self._last_preview_pil_frame)
-
-    def _render_scrub_frame(self, t):
-        if not self._live_renderer:
-            return
-        self._preview_requested_t = float(t)
-        if self._preview_frame_worker_active:
-            return
-        self._preview_frame_worker_active = True
-
-        def run():
-            try:
-                while self._preview_requested_t is not None:
-                    requested = self._preview_requested_t
-                    self._preview_requested_t = None
-                    with self._preview_render_lock:
-                        renderer = self._live_renderer
-                        if renderer is None:
-                            return
-                        arr = renderer.render_frame(requested)
-                    image = _PIL_Image.fromarray(arr)
-                    self.after(
-                        0, lambda img=image: self._show_pil_frame_fit(img)
-                    )
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                print(f"[미리보기] 프레임 렌더링 실패: {e}\n{tb}")
-                self.after(0, lambda: self._preview_status_label.configure(
-                    text=f"렌더링 오류: {e}"
-                ))
-            finally:
-                self._preview_frame_worker_active = False
-                if self._preview_requested_t is not None:
-                    self.after(
-                        0, lambda: self._render_scrub_frame(
-                            self._preview_requested_t
-                        )
-                    )
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _on_scrub_drag(self, value):
-        if getattr(self, '_programmatic_scrub', False):
-            return
-        # 사용자가 슬라이더를 직접 드래그하는 경우 재생 중이었다면 멈추고 탐색만
-        if self._scrub_playing:
-            self._scrub_playing = False
-            if self._scrub_after_id:
-                self.after_cancel(self._scrub_after_id)
-                self._scrub_after_id = None
-            self.preview_play_btn.configure(text="▶ 실시간 재생", command=self._start_scrub_play)
-        self._render_scrub_frame(float(value))
-
-    def _start_scrub_play(self):
-        if not self._live_renderer:
-            self._preview_render_video()
-            return
-        self._scrub_playing = True
-        self.preview_play_btn.configure(text="■ 정지", command=self._stop_scrub_play)
-        self._scrub_tick()
-
-    def _scrub_tick(self):
-        if not self._scrub_playing:
-            return
-        t = self.scrub_var.get()
-        if t >= self._live_duration:
-            self._stop_scrub_play()
-            return
-        self._render_scrub_frame(t)
-        self._programmatic_scrub = True
-        try:
-            self.scrub_var.set(t + 1.0 / 24.0)
-        finally:
-            self._programmatic_scrub = False
-        self._scrub_after_id = self.after(42, self._scrub_tick)  # 대략 24fps
-
-    def _stop_scrub_play(self):
-        self._scrub_playing = False
-        if self._scrub_after_id:
-            self.after_cancel(self._scrub_after_id)
-            self._scrub_after_id = None
-        self.preview_play_btn.configure(state=tk.NORMAL, text="▶ 실시간 재생", command=self._start_scrub_play)
-
-    def _start_render(self, out_dir_override=None, skip_completed=False):
-        if not self.app.video_groups:
-            messagebox.showwarning("경고", "먼저 분배를 실행하세요.")
-            return
-        out_dir = out_dir_override or filedialog.askdirectory(title="저장 폴더 선택")
-        if not out_dir: return
-        self._last_render_dir = out_dir
-        from render_jobs import RenderJob
-        self._render_job = RenderJob(out_dir)
-        self._render_cancel_event = self._render_job.cancel_event
-
-        self.render_btn.configure(state=tk.DISABLED, text="렌더링 중...")
-        self.cancel_render_btn.configure(state=tk.NORMAL)
-        self.retry_render_btn.configure(state=tk.DISABLED)
-        self._sync_group_bg(save=True)
-        try:
-            w, h = self._selected_resolution()
-        except (TypeError, ValueError) as error:
-            messagebox.showwarning("해상도 오류", str(error))
-            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
-            self.cancel_render_btn.configure(state=tk.DISABLED)
-            return
-        loop_enabled = self.loop_video_var.get()
-        try:
-            repeat_mode = self.loop_mode_var.get()
-            repeat_count = int(self.loop_count_var.get() or "1")
-            from repeat_settings import hms_to_seconds
-            repeat_target_seconds = hms_to_seconds(
-                self.loop_target_h_var.get() or "0",
-                self.loop_target_m_var.get() or "0",
-                self.loop_target_s_var.get() or "0",
-            )
-        except (TypeError, ValueError):
-            messagebox.showwarning(
-                "입력 오류", "반복 횟수와 목표시간에는 0 이상의 정수를 입력하세요."
-            )
-            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
-            self._sync_group_bg(save=False)
-            return
-        if loop_enabled and repeat_mode == "반복 횟수" and repeat_count < 1:
-            messagebox.showwarning("입력 오류", "반복 횟수는 1 이상이어야 합니다.")
-            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
-            self._sync_group_bg(save=False)
-            return
-        if (
-            loop_enabled
-            and repeat_mode == "목표 재생시간"
-            and repeat_target_seconds <= 0
-        ):
-            messagebox.showwarning("입력 오류", "목표 재생시간은 0보다 커야 합니다.")
-            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
-            self._sync_group_bg(save=False)
-            return
-        render_fps = int(self.fps_var.get())
-        codec_map = {
-            "자동": "auto",
-            "CPU (libx264)": "libx264",
-            "NVIDIA (h264_nvenc)": "h264_nvenc",
-            "Intel (h264_qsv)": "h264_qsv",
-            "AMD (h264_amf)": "h264_amf",
-        }
-        render_video_codec = codec_map.get(
-            self.video_codec_var.get(), "auto"
-        )
-        render_audio_codec = self.audio_codec_var.get()
-        render_video_bitrate = self.video_bitrate_var.get().strip() or "5000k"
-        render_audio_bitrate = self.audio_bitrate_var.get().strip() or "192k"
-        normalize_loudness = self.normalize_loudness_var.get()
-        render_groups = []
-        for group in self.app.video_groups:
-            snapshot = dict(group)
-            snapshot['tracks'] = [dict(track) for track in group.get('tracks', [])]
-            snapshot['clips'] = [
-                dict(clip) for clip in group.get('clips', [])
-            ]
-            render_groups.append(snapshot)
-        base_render_config = self._collect_config()
-        group_render_configs = []
-        for group in render_groups:
-            config = copy.deepcopy(base_render_config)
-            config['background']['image'] = group.get(
-                'bg_image', config['background'].get('image')
-            )
-            config['clips'] = copy.deepcopy(group.get('clips', []))
-            config['clip_enabled'] = group.get('clip_enabled', False)
-            config['clip_interval'] = group.get('clip_interval', 1.0)
-            config['clip_interval_unit'] = group.get(
-                'clip_interval_unit', '초'
-            )
-            config['clip_random'] = group.get('clip_random', False)
-            config['clip_random_base'] = group.get(
-                'clip_random_base', 'BPM'
-            )
-            group_render_configs.append(config)
-        project_state_snapshot = self.app.collect_project_state()
-        all_analysis_map = {
-            track.filepath: track.analysis
-            for track in self.app.tracks if track.analysis
-        }
-        try:
-            target_lufs = float(self.target_lufs_var.get())
-        except ValueError:
-            messagebox.showwarning("입력 오류", "목표 LUFS를 숫자로 입력하세요.")
-            self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
-            self.cancel_render_btn.configure(state=tk.DISABLED)
-            self._sync_group_bg(save=False)
-            return
-
-        _log_path = os.path.join(os.path.expanduser("~"), "AutoPlaylistMaker_render.log")
-        def _rlog(msg):
-            try:
-                with open(_log_path, "a", encoding="utf-8") as _lf:
-                    _lf.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-            except Exception:
-                pass
-
-        def run():
-            _rlog(f"=== 렌더 시작: {len(render_groups)}개 그룹 ===")
-            _rlog(f"out_dir={out_dir}")
-            try:
-                total_groups = len(render_groups)
-                self.after(0, lambda t=total_groups: self._render_set_progress(0, t, 0))
-                for gi, g in enumerate(render_groups):
-                    _rlog(f"--- 그룹 {gi} ---")
-                    if self._render_cancel_event.is_set():
-                        raise RuntimeError("사용자가 렌더링을 취소했습니다.")
-                    tracks = g.get('tracks', [])
-                    _rlog(f"  tracks 수: {len(tracks)}")
-                    if not tracks:
-                        _rlog("  tracks 비어있음 → skip")
-                        continue
-                    if skip_completed and self._render_job.is_completed(gi):
-                        _rlog("  이전 완료본 유지")
-                        self.after(
-                            0, lambda ii=gi: self._update_queue(ii, "기존 완료본 유지")
-                        )
-                        continue
-                    self.after(0, lambda ii=gi: self._update_queue(ii, "믹싱 중..."))
-
-                    valid_tracks = [
-                        t for t in tracks
-                        if t.get('analysis') and t.get('filepath')
-                    ]
-                    analyses = [t['analysis'] for t in valid_tracks]
-                    _rlog(f"  valid_tracks: {len(valid_tracks)}/{len(tracks)}")
-                    if not valid_tracks:
-                        for ti, t in enumerate(tracks):
-                            _rlog(f"    track {ti}: analysis={bool(t.get('analysis'))}, filepath={t.get('filepath', '<missing>')}")
-                    if not analyses:
-                        _rlog("  분석 결과 없음 → skip")
-                        continue
-
-                    g_dir = os.path.join(out_dir, f"mix_{gi+1}")
-                    os.makedirs(g_dir, exist_ok=True)
-
-                    a_out = os.path.join(g_dir, "audio.wav")
-                    from audio_pipeline import mix_tracks_streaming, normalize_loudness as normalize_audio
-                    ffmpeg_exe = video_gen._find_ffmpeg_exe()
-                    if not ffmpeg_exe or not os.path.isfile(ffmpeg_exe):
-                        raise RuntimeError(
-                            "ffmpeg를 찾을 수 없습니다.\n"
-                            "setup.bat을 실행하거나 시스템 PATH에 ffmpeg를 설치하세요."
-                        )
-                    _rlog(f"  ffmpeg: {ffmpeg_exe}")
-                    _rlog("  mix_tracks_streaming 호출...")
-                    _, dur, timestamps = mix_tracks_streaming(
-                        ffmpeg_exe, analyses, valid_tracks, a_out, 4.0,
-                        cancel_event=self._render_cancel_event,
-                    )
-                    _rlog(f"  믹싱 완료: dur={dur}, audio exists={os.path.isfile(a_out)}")
-                    if normalize_loudness:
-                        self.after(
-                            0, lambda ii=gi: self._update_queue(ii, "음량 정규화 중...")
-                        )
-                        normalized_out = os.path.join(g_dir, "audio_normalized.wav")
-                        normalize_audio(
-                            ffmpeg_exe, a_out, normalized_out,
-                            target_lufs=target_lufs, true_peak=-1.5,
-                            cancel_event=self._render_cancel_event,
-                        )
-                        os.replace(normalized_out, a_out)
-
-                    self.after(0, lambda ii=gi: self._update_queue(ii, "영상 생성 중..."))
-
-                    config = group_render_configs[gi]
-                    vc = os.path.join(g_dir, "_visual.json")
-                    with open(vc, 'w', encoding='utf-8') as f:
-                        json.dump(config, f, indent=2, ensure_ascii=False)
-
-                    _last_progress_ts = [0.0]
-
-                    def _on_frame_progress(value, total, ii=gi, tt=total_groups):
-                        if self._render_cancel_event.is_set():
-                            raise video_gen.RenderCancelledError(
-                                "사용자가 렌더링을 취소했습니다."
-                            )
-                        now = time.time()
-                        if now - _last_progress_ts[0] < 0.2 and value < total:
-                            return
-                        _last_progress_ts[0] = now
-                        frac = value / total if total else 0
-                        overall = (ii + frac) / max(tt, 1)
-                        self.after(0, lambda: (
-                            self.render_status.configure(text=f"영상 인코딩 중... {int(frac*100)}% (Mix {ii+1}/{tt})"),
-                            self._render_set_progress(ii, tt, overall),
-                        ))
-
-                    v_out = os.path.join(g_dir, f"mix_{gi+1}.mp4")
-                    _rlog(f"  generate_video 시작: {v_out}")
-                    _generate_video(analyses, a_out, v_out, width=w, height=h,
-                                   visual_config_path=vc, timestamps=timestamps,
-                                   crossfade_duration=4.0,
-                                   frame_progress_callback=_on_frame_progress,
-                                   fps=render_fps,
-                                   video_codec=render_video_codec,
-                                   audio_codec=render_audio_codec,
-                                   video_bitrate=render_video_bitrate,
-                                   audio_bitrate=render_audio_bitrate)
-                    _rlog(f"  영상 생성 완료: {os.path.isfile(v_out)}")
-
-                    txt_path = os.path.join(g_dir, "timestamps.txt")
-                    self._save_timestamps_txt(txt_path, timestamps, dur)
-
-                    if loop_enabled:
-                        if self._render_cancel_event.is_set():
-                            raise RuntimeError("사용자가 렌더링을 취소했습니다.")
-                        self.after(
-                            0, lambda ii=gi: self._update_queue(
-                                ii, "완성 영상 반복 중..."
-                            )
-                        )
-                        from repeat_settings import (
-                            MODE_COUNT, MODE_TARGET, build_repeat_plan,
-                        )
-                        repeat_plan = build_repeat_plan(
-                            dur,
-                            enabled=True,
-                            mode=(
-                                MODE_TARGET
-                                if repeat_mode == "목표 재생시간"
-                                else MODE_COUNT
-                            ),
-                            repeat_count=repeat_count,
-                            target_seconds=repeat_target_seconds,
-                        )
-                        loop_label = (
-                            f"target_{repeat_target_seconds}s"
-                            if repeat_plan.mode == MODE_TARGET
-                            else f"{repeat_plan.repeat_count}x"
-                        )
-                        loop_out = os.path.join(
-                            g_dir, f"mix_{gi+1}_loop_{loop_label}.mp4"
-                        )
-                        video_gen.loop_video_repetitions(
-                            v_out, loop_out, repeat_plan.repeat_count,
-                            cancel_event=self._render_cancel_event,
-                        )
-
-                    done_text = "완료! (반복본 포함)" if loop_enabled else "완료!"
-                    self.after(
-                        0, lambda ii=gi, text=done_text: self._update_queue(ii, text)
-                    )
-                    self.after(0, lambda ii=gi, tt=total_groups: self._render_set_progress(ii+1, tt, (ii+1)/max(tt,1)))
-
-                _rlog("=== 렌더 루프 종료 ===")
-                if self.app.project and self.app.project.project_dir:
-                    self.app.project.target_duration = self.app.stages[0].get_target_seconds()
-                    self.app.project.tolerance = self.app.stages[0].get_tolerance()
-                    with self.app._project_save_lock:
-                        self.app.project.save(
-                            analyses=all_analysis_map,
-                            video_groups=self.app.video_groups,
-                            app_state=project_state_snapshot,
-                        )
-
-                self.after(0, lambda: (self.render_status.configure(text="전체 렌더링 완료!"),
-                                       self.retry_render_btn.configure(state=tk.DISABLED),
-                                       messagebox.showinfo("완료", f"{out_dir}에 저장되었습니다")))
-
-            except Exception as e:
-                import traceback
-                tb = traceback.format_exc()
-                is_cancel = "취소" in str(e)
-                try:
-                    log_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-                    with open(os.path.join(log_dir, "render_error.log"), "w", encoding="utf-8") as ef:
-                        ef.write(f"{e}\n\n{tb}\n")
-                except Exception:
-                    pass
-                if is_cancel:
-                    self.after(0, lambda: (self.render_status.configure(text="렌더링이 취소되었습니다."),
-                                           self.retry_render_btn.configure(state=tk.NORMAL)))
-                else:
-                    self.after(0, lambda: self.render_status.configure(text=f"오류: {e}"))
-                    self.after(0, lambda: self.retry_render_btn.configure(state=tk.NORMAL))
-                    self.after(0, lambda: messagebox.showerror("오류", f"{e}\n\n자세한 내용은 render_error.log 확인"))
-            finally:
-                def _restore():
-                    self.render_btn.configure(state=tk.NORMAL, text="전체 렌더링 시작")
-                    self.cancel_render_btn.configure(state=tk.DISABLED, text="렌더링 취소")
-                    self._sync_group_bg(save=False)
-                self.after(0, _restore)
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def _cancel_render(self):
-        if self._render_job:
-            self._render_job.cancel()
-        self.cancel_render_btn.configure(state=tk.DISABLED, text="취소 요청됨...")
-        self.render_status.configure(text="현재 인코딩 작업을 안전하게 중단하는 중...")
-
-    def _retry_render(self):
-        if not self._last_render_dir:
-            messagebox.showinfo("재시도", "재시도할 이전 렌더 작업이 없습니다.")
-            return
-        self._start_render(self._last_render_dir, skip_completed=True)
-
-    def _update_queue(self, idx, text):
-        dur = self.app.video_groups[idx].get('total_duration', 0)
-        n = len(self.app.video_groups[idx].get('tracks', []))
-        self.queue_listbox.delete(idx)
-        self.queue_listbox.insert(idx, f"Mix {idx+1}: {n}곡, {int(dur)}초 ({int(dur//60)}분 {int(dur%60):02d}초)  [{text}]")
-
-    def _render_set_progress(self, done, total, pct):
-        self.render_progress_canvas.delete("all")
-        cw = self.render_progress_canvas.winfo_width()
-        if cw < 10:
-            cw = 200
-        h = 12
-        self.render_progress_canvas.create_rectangle(0, 0, cw, h, fill=THEME['bg_hover'], outline='')
-        if pct > 0:
-            self.render_progress_canvas.create_rectangle(0, 0, int(cw * pct), h,
-                                                          fill=THEME['accent'], outline='')
-        self.render_progress_label.configure(text=f"{done}/{total} 완료 ({int(pct*100)}%)")
-
-    def _save_timestamps_txt(self, filepath, timestamps, total_duration):
-        lines = []
-        for i, ts in enumerate(timestamps):
-            start = ts.get('start_time', 0)
-            sm, ss = int(start // 60), int(start % 60)
-            filename = ts.get('filename', 'Unknown')
-            lines.append(f"[{sm:02d}:{ss:02d}] {filename}")
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines) + '\n')
+# Stage3VideoEdit is split into Stage4DesignEffects (stage4_design_effects.py)
+# and Stage5Render (stage5_render.py) — imported at top of module.
 
 
 # ─── 메인 앱 ───
 
+class _LazyStage(tk.Frame):
+    """Lightweight placeholder replaced when a packaged user opens the stage."""
+
+    def __init__(self, parent, index):
+        super().__init__(parent, bg=THEME['bg_main'])
+        self.stage_index = index
+
+
 class AutoPlaylistMakerApp:
-    def __init__(self):
+    def __init__(self, defer_show=False):
+        _ensure_project_module()
         self.tracks = []
         self.video_groups = []
         self.project = _Project()
@@ -4211,9 +3918,11 @@ class AutoPlaylistMakerApp:
                 pass
         if root is None:
             root = tk.Tk()
+        if defer_show:
+            root.withdraw()
 
         self.root = root
-        self.root.title(f"Auto Playlist Maker v{APP_VERSION}")
+        self.root.title(t("splash.title") + " v" + APP_VERSION)
         self.root.geometry("1200x750")
         self.root.minsize(950, 620)
         self.root.configure(bg=THEME['bg_main'])
@@ -4239,40 +3948,51 @@ class AutoPlaylistMakerApp:
         visualizer = {}
         render = {}
         repeat = {}
-        if hasattr(self, 'stages') and len(self.stages) > 4:
-            stage = self.stages[4]
-            config = stage._collect_config()
+        visibility = {}
+        if (hasattr(self, 'stages') and len(self.stages) > 4
+                and hasattr(self.stages[4], "_collect_config")):
+            design_stage = self.stages[4]
+            config = design_stage._collect_config()
             design = {
                 key: config[key]
                 for key in (
                     'background', 'overlays', 'text', 'progress_bar',
-                    'fade', 'effects'
+                    'fade', 'effects', 'global_audio',
                 )
                 if key in config
             }
+            design['active_effects'] = config.get('active_effects', [])
             visualizer = config.get('visualizer', {})
-            render = {
-                'resolution': stage.resolution.get(),
-                'fps': stage.fps_var.get(),
-                'video_codec': stage.video_codec_var.get(),
-                'audio_codec': stage.audio_codec_var.get(),
-                'video_bitrate': stage.video_bitrate_var.get(),
-                'audio_bitrate': stage.audio_bitrate_var.get(),
-                'normalize_loudness': stage.normalize_loudness_var.get(),
-                'target_lufs': stage.target_lufs_var.get(),
-                'output_dir': stage._last_render_dir or '',
-            }
+            visibility = config.get('visibility', {})
+            from stage4_design_effects import LOOP_MODE_CHOICES
+            repeat_mode = _i18n_mod.choice_id(
+                design_stage.loop_mode_var.get(),
+                LOOP_MODE_CHOICES,
+                "count",
+            )
             repeat = {
-                'enabled': stage.loop_video_var.get(),
-                'mode': (
-                    'target'
-                    if stage.loop_mode_var.get() == "목표 재생시간"
-                    else 'count'
+                'enabled': design_stage.loop_video_var.get(),
+                'mode': repeat_mode,
+                'count': max(
+                    1, safe_int(design_stage.loop_count_var.get(), 1)
                 ),
-                'count': safe_int(stage.loop_count_var.get(), 1),
-                'target_h': safe_int(stage.loop_target_h_var.get()),
-                'target_m': safe_int(stage.loop_target_m_var.get()),
-                'target_s': safe_int(stage.loop_target_s_var.get()),
+                'target_h': safe_int(design_stage.loop_target_h_var.get()),
+                'target_m': safe_int(design_stage.loop_target_m_var.get()),
+                'target_s': safe_int(design_stage.loop_target_s_var.get()),
+            }
+        if (hasattr(self, 'stages') and len(self.stages) > 5
+                and hasattr(self.stages[5], "resolution")):
+            render_stage = self.stages[5]
+            render = {
+                'resolution': render_stage.resolution.get(),
+                'fps': render_stage.fps_var.get(),
+                'video_codec': render_stage.video_codec_var.get(),
+                'audio_codec': render_stage.audio_codec_var.get(),
+                'video_bitrate': render_stage.video_bitrate_var.get(),
+                'audio_bitrate': render_stage.audio_bitrate_var.get(),
+                'normalize_loudness': render_stage.normalize_loudness_var.get(),
+                'target_lufs': render_stage.target_lufs_var.get(),
+                'output_dir': render_stage._last_render_dir or '',
             }
         return {
             'current_step': self.current_stage,
@@ -4280,9 +4000,7 @@ class AutoPlaylistMakerApp:
                 'import': bool(self.tracks),
                 'distribution': bool(self.video_groups),
                 'audio_edit': bool(self.video_groups),
-                'clips': any(
-                    group.get('clips') for group in self.video_groups
-                ),
+                'clips': any(group.get('clips') for group in self.video_groups),
                 'design': bool(design),
             },
             'pages': pages,
@@ -4290,7 +4008,10 @@ class AutoPlaylistMakerApp:
             'design': design,
             'visualizer': visualizer,
             'render': render,
-            'repeat': repeat,
+            'repeat': repeat or dict(
+                getattr(self, "_pending_repeat_state", {}) or {}
+            ),
+            'visibility': visibility,
             'ui': {'dark_mode': self.dark_mode},
         }
 
@@ -4301,14 +4022,102 @@ class AutoPlaylistMakerApp:
         self._suspend_state_tracking = True
         try:
             restore_pages(self.stages, state.get('pages', []))
-            if len(self.stages) > 4:
-                self.stages[4]._last_render_dir = state.get(
-                    'render', {}
-                ).get('output_dir') or None
+            if len(self.stages) > 4 and hasattr(
+                self.stages[4], "_restore_effect_card_state"
+            ):
+                design_state = state.get("design", {}) or {}
+                has_effect_state = any(
+                    "active_effect_ids" in page.get("plain", {})
+                    for page in state.get("pages", [])
+                )
+                if not has_effect_state:
+                    from stage4_design_effects import EFFECT_DEFINITIONS
+                    saved_effects = design_state.get("active_effects")
+                    # Pre-card projects exposed every legacy effect control.
+                    # Keep their output unchanged on first migration.
+                    self.stages[4].active_effect_ids = list(
+                        saved_effects
+                        if isinstance(saved_effects, list)
+                        else EFFECT_DEFINITIONS
+                    )
+                    self.stages[4]._restore_effect_card_state()
+                audio_state = design_state.get("global_audio", {})
+                has_audio_page_state = any(
+                    "music_master_db" in page.get("variables", {})
+                    for page in state.get("pages", [])
+                )
+                design_stage = self.stages[4]
+                if audio_state and not has_audio_page_state:
+                    for variable_name, field_name, default in (
+                        ("music_master_db", "music_master_db", 0.0),
+                        ("normalize_tracks", "normalize_tracks", False),
+                        ("target_lufs", "target_lufs", -14.0),
+                        ("true_peak_ceiling", "true_peak_dbtp", -1.0),
+                        (
+                            "max_normalize_gain",
+                            "max_auto_gain_db",
+                            12.0,
+                        ),
+                        (
+                            "ambient_master_db",
+                            "ambient_master_db",
+                            -18.0,
+                        ),
+                    ):
+                        getattr(design_stage, variable_name).set(
+                            audio_state.get(field_name, default)
+                        )
+                    design_stage.ambient_tracks = list(
+                        audio_state.get("ambient_tracks", [])
+                    )
+                    design_stage._refresh_ambient_list()
+                elif not has_audio_page_state:
+                    legacy_render = state.get("render", {})
+                    if legacy_render.get("normalize_loudness"):
+                        design_stage.normalize_tracks.set(True)
+                        design_stage.target_lufs.set(
+                            legacy_render.get("target_lufs", -14.0)
+                        )
+            self._pending_repeat_state = dict(state.get('repeat', {}))
+            if len(self.stages) > 4 and hasattr(
+                    self.stages[4], "loop_video_var"):
+                self._apply_repeat_state_to_design(self.stages[4])
+            if len(self.stages) > 5 and hasattr(self.stages[5], "_last_render_dir"):
+                self.stages[5]._last_render_dir = state.get('render', {}).get('output_dir') or None
+            if len(self.stages) > 4 and hasattr(self.stages[4], "visibility_enabled"):
+                vis = state.get('visibility', {})
+                ds = self.stages[4]
+                if vis.get('enabled'):
+                    ds.visibility_enabled.set(True)
+                ds.set_visibility_seconds(
+                    vis.get("turn_off_after", vis.get("initial_visible", 0)),
+                    vis.get("restore_before_end", vis.get("ending_visible", 0)),
+                    vis.get("restore", bool(vis.get("ending_visible", 0))),
+                )
             step = int(state.get('current_step', 0))
             self.show_stage(max(0, min(step, len(self.stages) - 1)))
         finally:
             self._suspend_state_tracking = False
+
+    def _apply_repeat_state_to_design(self, stage):
+        repeat = getattr(self, "_pending_repeat_state", None) or {}
+        if not repeat:
+            return
+        target_seconds = int(repeat.get("target_seconds", 0) or 0)
+        target_h = int(repeat.get("target_h", target_seconds // 3600) or 0)
+        target_m = int(
+            repeat.get("target_m", (target_seconds % 3600) // 60) or 0
+        )
+        target_s = int(repeat.get("target_s", target_seconds % 60) or 0)
+        stage.loop_video_var.set(bool(repeat.get("enabled", False)))
+        stage.loop_mode_var.set(
+            "target" if repeat.get("mode") == "target" else "count"
+        )
+        stage.loop_count_var.set(str(max(1, int(repeat.get("count", 1)))))
+        stage.loop_target_h_var.set(str(max(0, target_h)))
+        stage.loop_target_m_var.set(str(max(0, target_m)))
+        stage.loop_target_s_var.set(str(max(0, target_s)))
+        stage._commit_repeat_fields()
 
     def _install_dirty_tracking(self):
         for stage in getattr(self, 'stages', []):
@@ -4343,17 +4152,20 @@ class AutoPlaylistMakerApp:
             self._state_save_after_id = None
         if hasattr(self, 'project_label'):
             name = self.project.name if self.project else ""
-            suffix = " · 저장되지 않은 변경사항" if self.dirty else ""
+            suffix = t("navigation.unsaved") if self.dirty else ""
             self.project_label.configure(
-                text=(f"프로젝트: {name}{suffix}" if name else suffix.lstrip(" ·"))
+                text=(t("navigation.projectLabel", name=name) + suffix if name else suffix.lstrip(" ·"))
             )
 
     def _on_close(self):
+        if getattr(self, "_closing", False):
+            return
         if self.dirty and not messagebox.askyesno(
-            "저장되지 않은 변경사항",
-            "저장되지 않은 변경사항이 있습니다. 저장하지 않고 종료할까요?",
+            t("navigation.unsavedTitle"),
+            t("navigation.unsavedBody"),
         ):
             return
+        self._closing = True
         if self._state_save_after_id:
             try:
                 self.root.after_cancel(self._state_save_after_id)
@@ -4363,9 +4175,44 @@ class AutoPlaylistMakerApp:
         for stage in getattr(self, 'stages', []):
             if hasattr(stage, 'on_hide'):
                 stage.on_hide()
+            cancel_event = getattr(
+                stage, "_analysis_cancel_event", None
+            )
+            if cancel_event is not None:
+                cancel_event.set()
+            overlay = getattr(stage, "_task_overlay", None)
+            if overlay is not None:
+                overlay.close()
+                stage._task_overlay = None
+            cancel_event = getattr(stage, "_render_cancel_event", None)
+            if cancel_event is not None:
+                cancel_event.set()
+            player = getattr(stage, "_preview_audio_player", None)
+            if player is not None:
+                player.stop()
         try:
             for after_id in self.root.tk.call('after', 'info'):
                 self.root.after_cancel(after_id)
+        except tk.TclError:
+            pass
+        try:
+            import psutil
+            children = psutil.Process(os.getpid()).children(recursive=True)
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.Error:
+                    pass
+            _, alive = psutil.wait_procs(children, timeout=1.5)
+            for child in alive:
+                try:
+                    child.kill()
+                except psutil.Error:
+                    pass
+        except (ImportError, OSError):
+            logger.exception("Failed to clean child processes during shutdown")
+        try:
+            self.root.quit()
         except tk.TclError:
             pass
         self.root.destroy()
@@ -4377,36 +4224,133 @@ class AutoPlaylistMakerApp:
         global THEME
         THEME = DARK if self.dark_mode else LIGHT
         self.root.configure(bg=THEME['bg_main'])
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(
+            ".",
+            background=THEME['bg_main'], foreground=THEME['fg'],
+            fieldbackground=THEME['bg_input'], bordercolor=THEME['border'],
+            focuscolor=THEME['accent'], font=_font(10),
+        )
+        style.configure(
+            "Treeview", background=THEME['bg_input'],
+            foreground=THEME['fg'], fieldbackground=THEME['bg_input'],
+            rowheight=30, borderwidth=0,
+        )
+        style.configure(
+            "Treeview.Heading", background=THEME['bg_mid'],
+            foreground=THEME['fg_dim'], font=_font(9, True),
+            padding=(8, 7), borderwidth=0, relief=tk.FLAT,
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", THEME['tree_sel'])],
+            foreground=[("selected", "#ffffff")],
+        )
+        style.configure(
+            "TScrollbar", background=THEME['scroll_fg'],
+            troughcolor=THEME['scroll_bg'], borderwidth=0,
+            arrowcolor=THEME['fg_dim'], relief=tk.FLAT,
+        )
+        style.map("TScrollbar", background=[("active", THEME['accent'])])
+        style.configure(
+            "TScale", background=THEME['bg_card'],
+            troughcolor=THEME['bg_input'], borderwidth=0,
+        )
+        style.configure(
+            "APM.TEntry",
+            fieldbackground=THEME['bg_input'], foreground=THEME['fg'],
+            insertcolor=THEME['fg'], bordercolor=THEME['border'],
+            lightcolor=THEME['border'], darkcolor=THEME['border'],
+            padding=(8, 6), relief=tk.FLAT,
+        )
+        style.map(
+            "APM.TEntry",
+            bordercolor=[
+                ("focus", THEME['accent']),
+                ("disabled", THEME['separator']),
+            ],
+            fieldbackground=[("disabled", THEME['bg_mid'])],
+            foreground=[("disabled", THEME['fg_dimmer'])],
+        )
+        style.configure(
+            "APM.TCheckbutton",
+            background=THEME['bg_card'], foreground=THEME['fg'],
+            indicatorcolor=THEME['bg_input'], indicatorrelief=tk.FLAT,
+            indicatormargin=(0, 0, 7, 0), padding=(0, 4),
+        )
+        style.map(
+            "APM.TCheckbutton",
+            background=[("active", THEME['bg_card'])],
+            foreground=[("disabled", THEME['fg_dimmer'])],
+            indicatorcolor=[
+                ("selected", THEME['accent']),
+                ("active", THEME['bg_hover']),
+            ],
+        )
+        style.configure(
+            "APM.Horizontal.TProgressbar",
+            troughcolor=THEME['slider_track'],
+            background=THEME['slider_fill'],
+            bordercolor=THEME['border'],
+            lightcolor=THEME['slider_fill'],
+            darkcolor=THEME['slider_fill'],
+            thickness=10,
+        )
 
     def build_nav(self):
-        self.nav = tk.Frame(self.root, bg=THEME['bg_mid'], height=48)
+        self.nav = tk.Frame(
+            self.root, bg=THEME['bg_mid'], height=58,
+            highlightthickness=1, highlightbackground=THEME['separator'],
+        )
         self.nav.pack(fill=tk.X)
         self.nav.pack_propagate(False)
+        self._nav_rtl = False
 
-        self.prev_btn = styled_button(self.nav, "◀ 이전", self.go_prev, padx=12)
-        self.prev_btn.pack(side=tk.LEFT, padx=(12, 0), pady=10)
+        self._nav_left_frame = tk.Frame(self.nav, bg=THEME['bg_mid'])
+        self._nav_left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._nav_right_frame = tk.Frame(self.nav, bg=THEME['bg_mid'])
 
-        self.stage_label = styled_label(self.nav, "", size=11, bold=True, bg=THEME['bg_mid'])
-        self.stage_label.pack(side=tk.LEFT, padx=16)
+        self.prev_btn = styled_button(self._nav_left_frame, t("navigation.prev"), self.go_prev, padx=12)
+        self.prev_btn.pack(side=tk.LEFT, padx=(16, 0), pady=11)
 
-        dots = tk.Frame(self.nav, bg=THEME['bg_mid'])
-        dots.pack(side=tk.LEFT, padx=8)
+        self.stage_label = styled_label(self._nav_left_frame, "", size=12, bold=True, bg=THEME['bg_mid'])
+        self.stage_label.pack(side=tk.LEFT, padx=(18, 12))
+
+        self._nav_dots = tk.Frame(self._nav_left_frame, bg=THEME['bg_mid'])
+        self._nav_dots.pack(side=tk.LEFT, padx=8)
         self.dots = []
-        for _ in range(5):
-            l = tk.Label(dots, text="\u25cf", font=_font(13), bg=THEME['bg_mid'], fg=THEME['fg_dimmer'])
-            l.pack(side=tk.LEFT, padx=3)
+        for _ in range(6):
+            l = tk.Label(self._nav_dots, text="\u25cf", font=_font(9), bg=THEME['bg_mid'], fg=THEME['fg_dimmer'])
+            l.pack(side=tk.LEFT, padx=4)
             self.dots.append(l)
 
-        self.project_label = styled_label(self.nav, "", size=9, color=THEME['success'], bg=THEME['bg_mid'])
-        self.project_label.pack(side=tk.LEFT, padx=12)
+        self.project_label = styled_label(self._nav_left_frame, "", size=9, color=THEME['success'], bg=THEME['bg_mid'])
+        self.project_label.pack(side=tk.LEFT, padx=16)
 
-        self.theme_btn = styled_button(self.nav, "☀" if self.dark_mode else "☾",
-                                        self._toggle_theme, padx=8, bg=THEME['bg_input'], fg=THEME['fg'])
-        self.theme_btn.pack(side=tk.RIGHT, padx=(0, 6), pady=10)
+        self.theme_btn = styled_button(self._nav_right_frame, t("navigation.themeLight") if self.dark_mode else t("navigation.themeDark"),
+                                        self._toggle_theme, padx=8)
+        self.theme_btn.pack(side=tk.RIGHT, padx=(0, 8), pady=11)
 
-        self.next_btn = styled_button(self.nav, "다음 ▶", self.go_next, "primary", padx=12)
-        self.next_btn.pack(side=tk.RIGHT, padx=(0, 12), pady=10)
-        self.next_btn.configure(state=tk.DISABLED)
+        self.next_btn = styled_button(self._nav_right_frame, t("navigation.next"), self.go_next, "primary", padx=12)
+        self.next_btn.pack(side=tk.RIGHT, padx=(0, 16), pady=11)
+        set_button_state(self.next_btn, tk.DISABLED)
+        self._nav_right_frame.pack(side=tk.RIGHT)
+
+    def _apply_nav_rtl(self, rtl):
+        if rtl == self._nav_rtl:
+            return
+        self._nav_rtl = rtl
+        if rtl:
+            self._nav_left_frame.pack_forget()
+            self._nav_right_frame.pack_forget()
+            self._nav_right_frame.pack(side=tk.LEFT)
+            self._nav_left_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        else:
+            self._nav_left_frame.pack_forget()
+            self._nav_right_frame.pack_forget()
+            self._nav_left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self._nav_right_frame.pack(side=tk.RIGHT)
 
     def _toggle_theme(self):
         from ui_state import capture_pages
@@ -4414,10 +4358,15 @@ class AutoPlaylistMakerApp:
         self.dark_mode = not self.dark_mode
         self._apply_theme()
 
-        self.nav.configure(bg=THEME['bg_mid'])
+        self.nav.configure(
+            bg=THEME['bg_mid'], highlightbackground=THEME['separator']
+        )
+        self._nav_left_frame.configure(bg=THEME['bg_mid'])
+        self._nav_right_frame.configure(bg=THEME['bg_mid'])
+        self._nav_dots.configure(bg=THEME['bg_mid'])
         self.stage_label.configure(bg=THEME['bg_mid'], fg=THEME['fg'])
         self.project_label.configure(bg=THEME['bg_mid'], fg=THEME['success'])
-        self.theme_btn.configure(text="☀" if self.dark_mode else "☾",
+        self.theme_btn.configure(text=t("navigation.themeLight") if self.dark_mode else t("navigation.themeDark"),
                                  bg=THEME['bg_input'], fg=THEME['fg'])
         for d in self.dots:
             d.configure(bg=THEME['bg_mid'])
@@ -4425,6 +4374,8 @@ class AutoPlaylistMakerApp:
                                 activebackground=THEME['bg_hover'])
         self.next_btn.configure(bg=THEME['accent'], fg="#ffffff",
                                 activebackground=THEME['accent_h'])
+        for button in (self.prev_btn, self.next_btn, self.theme_btn):
+            button._paint_state(False)
 
         self._rebuild_stages(stage_state)
 
@@ -4438,19 +4389,16 @@ class AutoPlaylistMakerApp:
         self._stage_container = tk.Frame(self.root, bg=THEME['bg_main'])
         self._stage_container.pack(fill=tk.BOTH, expand=True)
 
-        self.stages = [
-            Stage0Project(self._stage_container, self),
-            Stage1Distribute(self._stage_container, self),
-            Stage2MusicEdit(self._stage_container, self),
-            Stage2ClipList(self._stage_container, self),
-            Stage3VideoEdit(self._stage_container, self),
-        ]
-        self.titles = ["1/5  프로젝트 + 가져오기", "2/5  분배",
-                       "3/5  음악 편집", "4/5  클립 목록", "5/5  영상 편집 + 렌더링"]
+        self._create_stage_collection()
+        self.titles = [t("navigation.stage0"), t("navigation.stage1"),
+                       t("navigation.stage2"), t("navigation.stage3"),
+                       t("navigation.stage4"), t("navigation.stage5")]
 
-        if stage_state:
+        if stage_state and not self._lazy_stage_mode:
             from ui_state import restore_pages
             restore_pages(self.stages, stage_state)
+        elif stage_state:
+            self._pending_stage_state = stage_state
         self._install_dirty_tracking()
         self.show_stage(self.current_stage)
 
@@ -4458,17 +4406,112 @@ class AutoPlaylistMakerApp:
         self._stage_container = tk.Frame(self.root, bg=THEME['bg_main'])
         self._stage_container.pack(fill=tk.BOTH, expand=True)
 
-        self.stages = [
-            Stage0Project(self._stage_container, self),
-            Stage1Distribute(self._stage_container, self),
-            Stage2MusicEdit(self._stage_container, self),
-            Stage2ClipList(self._stage_container, self),
-            Stage3VideoEdit(self._stage_container, self),
-        ]
-        self.titles = ["1/5  프로젝트 + 가져오기", "2/5  분배",
-                       "3/5  음악 편집", "4/5  클립 목록", "5/5  영상 편집 + 렌더링"]
+        self._create_stage_collection()
+        self.titles = [t("navigation.stage0"), t("navigation.stage1"),
+                       t("navigation.stage2"), t("navigation.stage3"),
+                       t("navigation.stage4"), t("navigation.stage5")]
+
+    def _create_stage_collection(self):
+        self._output_settings_linked = False
+        factories = (
+            Stage0Project, Stage1Distribute, Stage2MusicEdit,
+            Stage2ClipList, Stage4DesignEffects, Stage5Render,
+        )
+        self._stage_factories = factories
+        self._lazy_stage_mode = bool(getattr(sys, "frozen", False))
+        if self._lazy_stage_mode:
+            self.stages = [
+                factories[0](self._stage_container, self),
+                *(_LazyStage(self._stage_container, index) for index in range(1, 6)),
+            ]
+        else:
+            self.stages = [
+                factory(self._stage_container, self) for factory in factories
+            ]
+            self._link_preview_output_settings()
+
+    def _ensure_stage(self, index):
+        stage = self.stages[index]
+        if not isinstance(stage, _LazyStage):
+            return stage
+        stage.destroy()
+        stage = self._stage_factories[index](self._stage_container, self)
+        self.stages[index] = stage
+        pending = getattr(self, "_pending_stage_state", None)
+        if pending and index < len(pending):
+            from ui_state import restore_pages
+            restore_pages([stage], [pending[index]])
+        if index == 4:
+            self._apply_repeat_state_to_design(stage)
+        if index in (4, 5):
+            self._link_preview_output_settings()
+        for value in vars(stage).values():
+            if isinstance(value, tk.Variable):
+                value.trace_add("write", self._on_project_variable_changed)
+        return stage
+
+    def _link_preview_output_settings(self):
+        """Keep preview and final output canvas settings on one live value."""
+        if len(getattr(self, "stages", [])) < 6:
+            return
+        design, render = self.stages[4], self.stages[5]
+        if isinstance(design, _LazyStage) or isinstance(render, _LazyStage):
+            return
+        if getattr(self, "_output_settings_linked", False):
+            return
+        self._output_settings_linked = True
+        self._syncing_output_settings = False
+        pairs = (
+            (design.resolution, render.resolution),
+            (design.custom_width_var, render.custom_width_var),
+            (design.custom_height_var, render.custom_height_var),
+            (design.fps_var, render.fps_var),
+        )
+
+        def sync(source, target):
+            if self._syncing_output_settings:
+                return
+            self._syncing_output_settings = True
+            try:
+                target.set(source.get())
+            finally:
+                self._syncing_output_settings = False
+
+        for design_var, render_var in pairs:
+            design_var.set(render_var.get())
+            design_var.trace_add(
+                "write",
+                lambda *_args, source=design_var, target=render_var:
+                sync(source, target),
+            )
+            render_var.trace_add(
+                "write",
+                lambda *_args, source=render_var, target=design_var:
+                sync(source, target),
+            )
+
+    def _refresh_lang_ui(self):
+        self.titles = [t("navigation.stage0"), t("navigation.stage1"),
+                       t("navigation.stage2"), t("navigation.stage3"),
+                       t("navigation.stage4"), t("navigation.stage5")]
+        try:
+            if 0 <= self.current_stage < len(self.stages):
+                self.stage_label.configure(text=self.titles[self.current_stage])
+                s = self.stages[self.current_stage]
+                if hasattr(s, 'refresh'):
+                    s.refresh()
+        except Exception as error:
+            _log_error("Language UI refresh failed", error)
+
+    def _on_language_changed(self):
+        rtl = _i18n_mod.get_instance().is_rtl()
+        self._apply_nav_rtl(rtl)
+        from ui_state import capture_pages
+        stage_state = capture_pages(self.stages)
+        self._rebuild_stages(stage_state)
 
     def show_stage(self, idx):
+        self._ensure_stage(idx)
         if (
             hasattr(self, 'stages')
             and 0 <= self.current_stage < len(self.stages)
@@ -4484,43 +4527,47 @@ class AutoPlaylistMakerApp:
         self.stage_label.configure(text=self.titles[idx])
         for i, d in enumerate(self.dots):
             d.configure(fg=THEME['accent'] if i == idx else (THEME['fg_dim'] if i < idx else THEME['fg_dimmer']))
-        self.prev_btn.configure(state=tk.NORMAL if idx > 0 else tk.DISABLED)
+        set_button_state(
+            self.prev_btn, tk.NORMAL if idx > 0 else tk.DISABLED
+        )
 
-        if idx >= 4:
+        if idx >= 5:
             self.next_btn.pack_forget()
         else:
-            self.next_btn.pack(side=tk.RIGHT, padx=(0, 12), pady=10)
+            self.next_btn.pack(side=tk.RIGHT, padx=(0, 16), pady=11)
             if idx == 0:
-                has = any(t.analysis for t in self.tracks if t.filetype == "audio")
-                self.next_btn.configure(state=tk.NORMAL if has else tk.DISABLED)
+                has = any(
+                    track.analysis
+                    for track in self.tracks
+                    if track.filetype == "audio"
+                )
+                set_button_state(
+                    self.next_btn, tk.NORMAL if has else tk.DISABLED
+                )
             elif idx == 1:
-                self.next_btn.configure(state=tk.NORMAL if self.video_groups else tk.DISABLED)
+                set_button_state(
+                    self.next_btn,
+                    tk.NORMAL if self.video_groups else tk.DISABLED,
+                )
             else:
-                self.next_btn.configure(state=tk.NORMAL)
+                set_button_state(self.next_btn, tk.NORMAL)
 
         if self.project and self.project.name:
-            self.project_label.configure(text=f"프로젝트: {self.project.name}")
+            self.project_label.configure(text=t("navigation.projectLabel", name=self.project.name))
         else:
             self.project_label.configure(text="")
 
-        try:
-            self.stages[idx].refresh()
-        except:
-            pass
-
-        for i, s in enumerate(self.stages):
-            if i == idx:
-                continue
-            if hasattr(s, 'refresh'):
-                def _defer_refresh(panel=s):
-                    try:
-                        panel.refresh()
-                    except:
-                        pass
-                self.root.after(50, _defer_refresh)
+        active_stage = self.stages[idx]
+        if hasattr(active_stage, "refresh"):
+            try:
+                active_stage.refresh()
+            except Exception as error:
+                _log_error("show_stage.refresh", error)
 
     def enable_next(self, enabled=True):
-        self.next_btn.configure(state=tk.NORMAL if enabled else tk.DISABLED)
+        set_button_state(
+            self.next_btn, tk.NORMAL if enabled else tk.DISABLED
+        )
 
     def persist_video_groups(self):
         """Atomically persist lightweight edit metadata without rewriting caches."""
@@ -4561,7 +4608,7 @@ class AutoPlaylistMakerApp:
                     ),
                 )
             except Exception as error:
-                print(f"프로젝트 자동 저장 실패: {error}")
+                print(t("navigation.autoSaveFailed", error=error))
 
         threading.Thread(target=save, daemon=True).start()
 
@@ -4583,7 +4630,7 @@ class SplashScreen:
     def __init__(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
-        self.root.configure(bg='#090a0f')
+        self.root.configure(bg='#111827')
         self.root.attributes('-topmost', True)
         self.root.resizable(False, False)
         apply_window_icon(self.root)
@@ -4595,9 +4642,9 @@ class SplashScreen:
         y = (sh - h) // 2
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
-        outer = tk.Frame(self.root, bg='#26243d', padx=1, pady=1)
+        outer = tk.Frame(self.root, bg='#111827')
         outer.pack(fill=tk.BOTH, expand=True)
-        inner = tk.Frame(outer, bg='#090a0f')
+        inner = tk.Frame(outer, bg='#111827')
         inner.pack(fill=tk.BOTH, expand=True)
 
         try:
@@ -4606,27 +4653,27 @@ class SplashScreen:
             tk.Label(
                 inner,
                 image=self.icon_image,
-                bg="#090a0f",
+                bg="#111827",
                 borderwidth=0,
                 highlightthickness=0,
             ).pack(pady=(18, 2))
         except (OSError, tk.TclError):
             self.icon_image = None
 
-        tk.Label(inner, text="Auto Playlist Maker", font=("D2Coding", 19, "bold"),
-                 bg='#090a0f', fg='#f4f4f7').pack(pady=(2, 0))
-        tk.Label(inner, text=f"v{APP_VERSION}", font=("D2Coding", 11),
-                 bg='#090a0f', fg='#8e8e98').pack()
+        tk.Label(inner, text=t("splash.title"), font=(FONT_FAMILY, 19, "bold"),
+                 bg='#111827', fg='#f8fafc').pack(pady=(2, 0))
+        tk.Label(inner, text=t("splash.version", version=APP_VERSION), font=(FONT_FAMILY, 11),
+                 bg='#111827', fg='#94a3b8').pack()
 
-        self.status_var = tk.StringVar(value="시작 중...")
+        self.status_var = tk.StringVar(value=t("splash.starting"))
         self.status_label = tk.Label(inner, textvariable=self.status_var,
-                                     font=("D2Coding", 9), bg='#090a0f', fg='#96969f')
+                                     font=(FONT_FAMILY, 9), bg='#111827', fg='#94a3b8')
         self.status_label.pack(pady=(10, 6))
 
-        bar_frame = tk.Frame(inner, bg='#1b1b25', height=6)
+        bar_frame = tk.Frame(inner, bg='#263247', height=6)
         bar_frame.pack(fill=tk.X, padx=42, pady=(0, 18))
         bar_frame.pack_propagate(False)
-        self.bar_canvas = tk.Canvas(bar_frame, bg='#1b1b25', highlightthickness=0, height=6)
+        self.bar_canvas = tk.Canvas(bar_frame, bg='#263247', highlightthickness=0, height=6)
         self.bar_canvas.pack(fill=tk.BOTH, expand=True)
 
         self.bar_width = 0
@@ -4644,17 +4691,48 @@ class SplashScreen:
             self.bar_canvas.delete("all")
             if self.bar_width > 0:
                 self.bar_canvas.create_rectangle(0, 0, self.bar_width, 8,
-                                                  fill='#7667f6', outline='')
+                                                  fill='#818cf8', outline='')
             self.root.update_idletasks()
             self.root.update()
-        except:
+        except tk.TclError:
             pass
 
     def close(self):
         try:
             self.root.destroy()
-        except:
+        except tk.TclError:
             pass
+
+
+class NativeSplash:
+    """Keep the PyInstaller bootloader splash visible until the main UI paints."""
+
+    def __init__(self):
+        import pyi_splash
+        self._splash = pyi_splash
+
+    def update(self, text, _progress):
+        try:
+            self._splash.update_text(text)
+        except Exception:
+            logger.debug("Native splash text update failed", exc_info=True)
+
+    def close(self):
+        try:
+            self._splash.close()
+        except Exception:
+            logger.debug("Native splash close failed", exc_info=True)
+
+
+def _create_startup_splash():
+    if "--launcher-splash" in sys.argv:
+        return SplashScreen()
+    if getattr(sys, "frozen", False) and os.environ.get("_PYI_SPLASH_IPC"):
+        try:
+            return NativeSplash()
+        except (ImportError, KeyError, OSError):
+            logger.exception("Native splash unavailable; using Tk fallback")
+    return SplashScreen()
 
 
 # ─── 진입점 ───
@@ -4662,71 +4740,12 @@ class SplashScreen:
 def _load_heavy_modules_step(splash, step, prog):
     splash.update(step, prog)
     time.sleep(0.01)
-    splash.root.update_idletasks()
-    splash.root.update()
 
 
 def _preflight_ffmpeg():
-    """moviepy import 전에 ffmpeg 경로를 찾아서 환경변수에 설정."""
-    _log = []
-
-    env_exe = os.environ.get("FFMPEG_BINARY", "")
-    _log.append(f"env before: {env_exe!r}")
-
-    if env_exe and env_exe not in ("ffmpeg-imageio", "auto-detect") and os.path.isfile(env_exe):
-        _log.append(f"env already valid: {env_exe}")
-        _write_ffmpeg_log(_log)
-        return
-
-    candidates = []
-
-    try:
-        import imageio_ffmpeg
-        exe = imageio_ffmpeg.get_ffmpeg_exe()
-        _log.append(f"imageio_ffmpeg: {exe!r} exists={os.path.isfile(exe) if exe else False}")
-        if exe and os.path.isfile(exe):
-            candidates.append(exe)
-    except Exception as e:
-        _log.append(f"imageio_ffmpeg error: {e}")
-
-    meipass = getattr(sys, '_MEIPASS', None)
-    _log.append(f"MEIPASS: {meipass!r}")
-    if meipass and os.path.isdir(meipass):
-        for root, dirs, files in os.walk(meipass):
-            for f in files:
-                if f.lower().startswith('ffmpeg') and f.lower().endswith('.exe'):
-                    candidates.append(os.path.join(root, f))
-                    _log.append(f"MEIPASS found: {os.path.join(root, f)}")
-
-    for name in ('ffmpeg', 'ffmpeg.exe'):
-        p = shutil.which(name)
-        if p:
-            candidates.append(p)
-            _log.append(f"which({name}): {p}")
-
-    try:
-        import importlib.resources as _res
-        ref = _res.files("imageio_ffmpeg") / "binaries"
-        with _res.as_file(ref) as bindir:
-            if os.path.isdir(str(bindir)):
-                for f in os.listdir(str(bindir)):
-                    if f.lower().endswith('.exe'):
-                        candidates.append(os.path.join(str(bindir), f))
-                        _log.append(f"res found: {os.path.join(str(bindir), f)}")
-    except Exception as e:
-        _log.append(f"res error: {e}")
-
-    _log.append(f"all candidates: {candidates}")
-
-    for c in candidates:
-        if os.path.isfile(c):
-            os.environ["FFMPEG_BINARY"] = c
-            _log.append(f"SET FFMPEG_BINARY = {c}")
-            _write_ffmpeg_log(_log)
-            return
-
-    _log.append("WARNING: ffmpeg not found!")
-    _write_ffmpeg_log(_log)
+    """Resolve and verify FFmpeg before importing MoviePy."""
+    from ffmpeg_service import resolve_ffmpeg_executable
+    return resolve_ffmpeg_executable(force_refresh=True)
 
 
 def _write_ffmpeg_log(lines):
@@ -4750,6 +4769,7 @@ def _write_ffmpeg_log(lines):
 
 
 def main():
+    _startup_mark("python_entry")
     if sys.platform == "win32":
         try:
             import ctypes
@@ -4759,99 +4779,28 @@ def main():
         except (AttributeError, OSError):
             pass
 
-    if getattr(sys, 'frozen', False) and getattr(sys, 'frozen', False):
+    if getattr(sys, 'frozen', False):
         if sys.stdout is None:
             sys.stdout = open(os.devnull, 'w', encoding='utf-8')
         if sys.stderr is None:
             sys.stderr = open(os.devnull, 'w', encoding='utf-8')
 
-    splash = SplashScreen()
-    # PyInstaller의 네이티브 스플래시는 one-file 압축 해제 중 즉시 표시된다.
-    # Tk 스플래시가 실제로 그려진 뒤 닫아 두 화면 사이의 공백을 없앤다.
-    splash.root.update_idletasks()
-    splash.root.update()
-    try:
-        import pyi_splash
-        pyi_splash.close()
-    except ImportError:
-        pass
+    splash = _create_startup_splash()
+    _startup_mark("startup_splash_visible")
 
-    _load_heavy_modules_step(splash, "numpy 로딩 중...", 0.05)
-    import numpy as _numpy
-    global _np
-    _np = _numpy
+    _load_heavy_modules_step(splash, t("splash.loadingProject"), 0.65)
+    _ensure_project_module()
+    _startup_mark("project_model_ready")
+    _load_heavy_modules_step(splash, t("splash.loadingGui"), 0.90)
 
-    _load_heavy_modules_step(splash, "ffmpeg 경로 탐색 중...", 0.10)
-    _preflight_ffmpeg()
-    ffmpeg_found = bool(os.environ.get("FFMPEG_BINARY", ""))
-
-    _load_heavy_modules_step(splash, "PIL 로딩 중...", 0.15)
-    from PIL import Image as PILImage, ImageTk as PILImageTk, ImageDraw as PILImageDraw, ImageFont as PILImageFont
-    global _PIL_Image, _PIL_ImageTk, _PIL_ImageDraw, _PIL_ImageFont
-    _PIL_Image = PILImage
-    _PIL_ImageTk = PILImageTk
-    _PIL_ImageDraw = PILImageDraw
-    _PIL_ImageFont = PILImageFont
-
-    _load_heavy_modules_step(splash, "분석 엔진 로딩 중...", 0.35)
-    from analyzer import analyze_track as _at
-    from transition import create_mixed_audio as _cma, load_audio_pydub as _lap
-    global _analyze_track, _create_mixed_audio, _load_audio_pydub
-    _analyze_track = _at
-    _create_mixed_audio = _cma
-    _load_audio_pydub = _lap
-
-    _load_heavy_modules_step(splash, "영상 엔진 로딩 중...", 0.55)
-    import video_gen as _video_gen_mod
-    from video_gen import generate_video as _gv, load_visual_config as _lvc
-    global _generate_video, _load_visual_config, video_gen
-    _generate_video = _gv
-    video_gen = _video_gen_mod
-    _load_visual_config = _lvc
-
-    _load_heavy_modules_step(splash, "프로젝트 관리 로딩 중...", 0.70)
-    from project import Project as _Proj
-    global _Project
-    _Project = _Proj
-
-    _load_heavy_modules_step(splash, "분배 엔진 로딩 중...", 0.85)
-    from distributor import distribute_tracks as _dt, get_distribution_summary as _gs
-    global _distribute_tracks, _get_distribution_summary
-    _distribute_tracks = _dt
-    _get_distribution_summary = _gs
-    global _loaded
-    _loaded = True
-
-    _load_heavy_modules_step(splash, "GUI 구성 중...", 0.95)
-
-    splash.update("완료!", 1.0)
-    splash.root.update_idletasks()
-    splash.root.update()
-    time.sleep(0.15)
+    app = AutoPlaylistMakerApp(defer_show=True)
+    splash.update(t("splash.complete"), 1.0)
+    app.root.deiconify()
+    app.root.update_idletasks()
+    app.root.update()
+    _startup_mark("main_window_interactive")
     splash.close()
-    time.sleep(0.05)
-
-    if not ffmpeg_found:
-        try:
-            import tkinter as _tk
-            from tkinter import messagebox as _mb
-            _tmp = _tk.Tk()
-            _tmp.withdraw()
-            exe_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
-            setup_bat = os.path.join(exe_dir, "setup.bat")
-            msg = (
-                "ffmpeg가 설치되어 있지 않습니다.\n\n"
-                "Auto Playlist Maker는 오디오/비디오 처리에 ffmpeg가 필요합니다.\n\n"
-                f"setup.bat을 더블클릭하여 자동 설치할 수 있습니다.\n"
-                f"경로: {setup_bat}\n\n"
-                "설치 후 PC를 재시작하고 Auto Playlist Maker를 다시 실행해주세요."
-            )
-            _mb.showwarning("ffmpeg 필요", msg)
-            _tmp.destroy()
-        except Exception:
-            pass
-
-    app = AutoPlaylistMakerApp()
+    app.root.lift()
     app.run()
 
 

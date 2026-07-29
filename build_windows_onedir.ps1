@@ -1,11 +1,12 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$version = "1.2.0"
+$version = "1.3.0"
 $appName = "AutoPlaylistMaker_v$version"
 $distRoot = Join-Path $PSScriptRoot "dist"
 $bundleDir = Join-Path $distRoot $appName
 $output = Join-Path $bundleDir "$appName.exe"
+$coreOutput = Join-Path $bundleDir "$appName.core.exe"
 $zipOutput = Join-Path $distRoot "${appName}_windows_x64.zip"
 
 $pythonDlls = Join-Path (python -c "import sys; print(sys.prefix)") "DLLs"
@@ -21,7 +22,9 @@ $arguments = @(
     "--icon", "app_icon.ico",
     "--add-data", "app_icon.ico;.",
     "--add-data", "app_icon.png;.",
+    "--add-data", "app_splash.png;.",
     "--add-data", "visual_config.json;.",
+    "--add-data", "locales;locales",
     "--add-binary", "$tclDll;.",
     "--add-binary", "$tkDll;.",
     "--collect-all", "imageio_ffmpeg",
@@ -43,6 +46,7 @@ $arguments = @(
     "--hidden-import", "analyzer",
     "--hidden-import", "transition",
     "--hidden-import", "video_gen",
+    "--hidden-import", "ffmpeg_service",
     "--hidden-import", "project",
     "--hidden-import", "distributor",
     "--hidden-import", "audio_preview",
@@ -51,6 +55,11 @@ $arguments = @(
     "--hidden-import", "ui_state",
     "--hidden-import", "repeat_settings",
     "--hidden-import", "font_combo",
+    "--hidden-import", "i18n",
+    "--hidden-import", "stage4_design_effects",
+    "--hidden-import", "stage5_render",
+    "--hidden-import", "timeline_utils",
+    "--hidden-import", "psutil",
     "app.py"
 )
 
@@ -61,6 +70,19 @@ if ($LASTEXITCODE -ne 0) {
 
 if (-not (Test-Path -LiteralPath $output)) {
     throw "Build completed without output: $output"
+}
+Move-Item -LiteralPath $output -Destination $coreOutput -Force
+Copy-Item -LiteralPath "app_splash.png" -Destination $bundleDir -Force
+
+$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+if (-not (Test-Path -LiteralPath $csc)) {
+    throw "Windows C# compiler not found: $csc"
+}
+& $csc /nologo /target:winexe /optimize+ /win32icon:app_icon.ico `
+    /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
+    "/out:$output" native_launcher.cs
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) {
+    throw "Native launcher build failed with exit code $LASTEXITCODE"
 }
 
 $internalDir = Join-Path $bundleDir "_internal"

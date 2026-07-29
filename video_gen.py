@@ -1,4 +1,4 @@
-"""영상 생성 모듈: 유저 이미지 배경 + 비주얼라이저 + 페이드 이펙트"""
+"""영상 생성 모듈: 사용자 이미지 배경 + 비주얼라이저 + 페이드 효과."""
 
 import sys
 import numpy as np
@@ -7,11 +7,24 @@ import json
 import colorsys
 import math
 import subprocess
+import threading
+from i18n import t, choice_id
+
+CLIP_INTERVAL_CHOICES = {
+    "seconds": "clip.seconds",
+    "beat": "clip.beat",
+    "per_track": "clip.perTrack",
+}
 import shutil
 import copy
 import soundfile as sf
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops
 from moviepy import AudioFileClip
+from timeline_utils import should_render_visuals, normalize_visibility_settings
+from ffmpeg_service import (
+    configure_moviepy_ffmpeg,
+    resolve_ffmpeg_executable,
+)
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 
@@ -21,53 +34,17 @@ class RenderCancelledError(RuntimeError):
 
 
 def _find_ffmpeg_exe():
-    """imageio_ffmpeg 또는 시스템 PATH에서 ffmpeg 실행 파일 경로를 찾는다.
-    찾으면 절대 경로 문자열, 없으면 None."""
-    try:
-        import imageio_ffmpeg
-        p = imageio_ffmpeg.get_ffmpeg_exe()
-        if p and os.path.isfile(p):
-            return p
-    except Exception:
-        pass
-    p = shutil.which('ffmpeg')
-    if p:
-        return p
-    if os.name == 'nt':
-        p = shutil.which('ffmpeg.exe')
-        if p:
-            return p
-    return None
+    """Backward-compatible wrapper for the public FFmpeg resolver."""
+    return resolve_ffmpeg_executable()
 
 
 def _ensure_ffmpeg_for_moviepy():
     """moviepy의 ffmpeg 경로를 올바른 값으로 강제 설정."""
     try:
-        ffmpeg_path = _find_ffmpeg_exe()
+        ffmpeg_path = configure_moviepy_ffmpeg()
         _log_lines = [f"_find_ffmpeg_exe -> {ffmpeg_path!r}"]
-        if not ffmpeg_path:
-            _log_lines.append("ffmpeg not found!")
-            _write_log(_log_lines)
-            return
         _log_lines.append(f"exists={os.path.isfile(ffmpeg_path)}")
-        os.environ["FFMPEG_BINARY"] = ffmpeg_path
-        import moviepy.config as _mc
-        _mc.FFMPEG_BINARY = ffmpeg_path
-        _log_lines.append(f"moviepy.config.FFMPEG_BINARY = {ffmpeg_path}")
-        try:
-            import moviepy.video.io.ffmpeg_writer as _fw
-            old = getattr(_fw, 'FFMPEG_BINARY', '?')
-            _fw.FFMPEG_BINARY = ffmpeg_path
-            _log_lines.append(f"ffmpeg_writer.FFMPEG_BINARY: {old!r} -> {ffmpeg_path}")
-        except Exception as e:
-            _log_lines.append(f"ffmpeg_writer patch error: {e}")
-        try:
-            import moviepy.audio.io.ffmpeg_audiowriter as _aw
-            old_a = getattr(_aw, 'FFMPEG_BINARY', '?')
-            _aw.FFMPEG_BINARY = ffmpeg_path
-            _log_lines.append(f"ffmpeg_audiowriter.FFMPEG_BINARY: {old_a!r} -> {ffmpeg_path}")
-        except Exception as e:
-            _log_lines.append(f"ffmpeg_audiowriter patch error: {e}")
+        _log_lines.append(f"moviepy configured: {ffmpeg_path}")
         _write_log(_log_lines)
     except Exception as e:
         try:
@@ -97,17 +74,12 @@ def _write_log(lines):
 def _detect_gpu_encoder():
     """시스템에 GPU 하드웨어 인코더가 있는지 감지하고 코덱 이름 반환.
     없으면 'libx264' (CPU 소프트웨어 인코딩)을 반환한다."""
-    try:
-        ffmpeg_exe = _find_ffmpeg_exe()
-        if not ffmpeg_exe:
-            return 'libx264'
-
+    def _check(ffmpeg_exe):
         result = subprocess.run(
             [ffmpeg_exe, '-encoders'], capture_output=True, text=True, timeout=10,
             creationflags=_NO_WINDOW,
         )
         encoders = result.stdout
-
         if 'h264_nvenc' in encoders:
             return 'h264_nvenc'
         if 'h264_qsv' in encoders:
@@ -116,6 +88,21 @@ def _detect_gpu_encoder():
             return 'h264_vaapi'
         if 'h264_amf' in encoders:
             return 'h264_amf'
+        return None
+    try:
+        ffmpeg_exe = resolve_ffmpeg_executable()
+        if ffmpeg_exe:
+            codec = _check(ffmpeg_exe)
+            if codec:
+                return codec
+    except Exception:
+        pass
+    try:
+        sys_ffmpeg = shutil.which('ffmpeg') or (shutil.which('ffmpeg.exe') if os.name == 'nt' else None)
+        if sys_ffmpeg and os.path.isfile(sys_ffmpeg):
+            codec = _check(sys_ffmpeg)
+            if codec:
+                return codec
     except Exception:
         pass
     return 'libx264'
@@ -129,15 +116,15 @@ def loop_video_to_duration(input_path, output_path, target_seconds, cancel_event
     can end exactly at the requested timestamp instead of a keyframe boundary.
     """
     if not os.path.isfile(input_path):
-        raise FileNotFoundError(f"반복할 영상을 찾을 수 없습니다: {input_path}")
+        raise FileNotFoundError(t("video.loopFileNotFound", path=input_path))
     if target_seconds <= 0:
-        raise ValueError("반복 영상 길이는 0초보다 커야 합니다.")
+        raise ValueError(t("video.loopDurationError"))
     if os.path.abspath(input_path) == os.path.abspath(output_path):
-        raise ValueError("반복 영상 출력 경로는 원본과 달라야 합니다.")
+        raise ValueError(t("video.loopOutputError"))
 
-    ffmpeg_exe = _find_ffmpeg_exe()
+    ffmpeg_exe = resolve_ffmpeg_executable()
     if not ffmpeg_exe:
-        raise RuntimeError("영상 반복에 필요한 ffmpeg를 찾을 수 없습니다.")
+        raise RuntimeError(t("video.ffmpegNotFound"))
 
     output_dir = os.path.dirname(os.path.abspath(output_path))
     os.makedirs(output_dir, exist_ok=True)
@@ -150,7 +137,7 @@ def loop_video_to_duration(input_path, output_path, target_seconds, cancel_event
         '-t', f"{float(target_seconds):.3f}",
         '-map', '0:v:0', '-map', '0:a?',
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
-        '-c:a', 'aac', '-b:a', '192k',
+        '-c:a', 'aac', '-b:a', '320k',
         '-movflags', '+faststart',
         temp_output,
     ]
@@ -164,11 +151,11 @@ def loop_video_to_duration(input_path, output_path, target_seconds, cancel_event
             if cancel_event is not None and cancel_event.wait(0.1):
                 process.terminate()
                 process.wait(timeout=5)
-                raise RuntimeError("사용자가 반복 영상 생성을 취소했습니다.")
+                raise RuntimeError(t("video.userCancelled"))
         stdout, stderr = process.communicate()
         if process.returncode != 0:
-            detail = (stderr or stdout or "알 수 없는 오류").strip()
-            raise RuntimeError(f"영상 반복 생성 실패:\n{detail}")
+            detail = (stderr or stdout or t("video.unknownError")).strip()
+            raise RuntimeError(t("video.loopFailed", detail=detail))
         os.replace(temp_output, output_path)
     finally:
         if os.path.exists(temp_output):
@@ -185,16 +172,16 @@ def loop_video_repetitions(
 ):
     """Repeat a completed video by whole-playlist units without truncation."""
     if not os.path.isfile(input_path):
-        raise FileNotFoundError(f"반복할 영상을 찾을 수 없습니다: {input_path}")
+        raise FileNotFoundError(t("video.loopFileNotFound", path=input_path))
     count = int(repeat_count)
     if count < 1:
-        raise ValueError("반복 횟수는 1회 이상이어야 합니다.")
+        raise ValueError(t("video.repeatCountError"))
     if os.path.abspath(input_path) == os.path.abspath(output_path):
-        raise ValueError("반복 영상 출력 경로는 원본과 달라야 합니다.")
+        raise ValueError(t("video.loopOutputError"))
 
-    ffmpeg_exe = _find_ffmpeg_exe()
+    ffmpeg_exe = resolve_ffmpeg_executable()
     if not ffmpeg_exe:
-        raise RuntimeError("영상 반복에 필요한 ffmpeg를 찾을 수 없습니다.")
+        raise RuntimeError(t("video.ffmpegNotFound"))
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     temp_output = os.path.join(
         os.path.dirname(os.path.abspath(output_path)),
@@ -219,13 +206,11 @@ def loop_video_repetitions(
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
-                raise RuntimeError("사용자가 반복 영상 생성을 취소했습니다.")
+                raise RuntimeError(t("video.userCancelled"))
         stdout, stderr = process.communicate()
         if process.returncode:
-            raise RuntimeError(
-                f"영상 반복 생성 실패:\n"
-                f"{(stderr or stdout or '알 수 없는 오류').strip()}"
-            )
+            detail = (stderr or stdout or t("video.unknownError")).strip()
+            raise RuntimeError(t("video.loopFailed", detail=detail))
         os.replace(temp_output, output_path)
     finally:
         if os.path.exists(temp_output):
@@ -233,6 +218,54 @@ def loop_video_repetitions(
                 os.remove(temp_output)
             except OSError:
                 pass
+    return output_path
+
+
+def apply_visibility_window(
+    input_path, output_path, total_duration, settings,
+    cancel_event=None, video_codec="libx264",
+):
+    """Apply one black interval against the final, possibly repeated timeline."""
+    vis = normalize_visibility_settings(settings)
+    if not vis["enabled"] or vis["turn_off_after"] >= total_duration:
+        shutil.copy2(input_path, output_path)
+        return output_path
+    black_start = vis["turn_off_after"]
+    black_end = (
+        total_duration - vis["restore_before_end"]
+        if vis["restore"] else total_duration
+    )
+    if black_end <= black_start:
+        shutil.copy2(input_path, output_path)
+        return output_path
+    color = str(vis.get("black_color", "#000000")).replace("#", "0x")
+    enable = f"between(t\\,{black_start:.6f}\\,{black_end:.6f})"
+    command = [
+        resolve_ffmpeg_executable(), "-hide_banner", "-loglevel", "error", "-y",
+        "-i", input_path, "-vf",
+        f"drawbox=x=0:y=0:w=iw:h=ih:color={color}:t=fill:enable='{enable}'",
+        "-c:v", video_codec if video_codec != "auto" else "libx264",
+        "-c:a", "copy", output_path,
+    ]
+    process = subprocess.Popen(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        creationflags=_NO_WINDOW,
+    )
+    while process.poll() is None:
+        if cancel_event is not None and cancel_event.is_set():
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            raise RenderCancelledError(t("render.cancelled"))
+        if cancel_event is not None:
+            cancel_event.wait(0.05)
+        else:
+            process.wait()
+    stderr = process.stderr.read().decode(errors="replace") if process.stderr else ""
+    if process.returncode:
+        raise RuntimeError(stderr or "FFmpeg visibility filter failed")
     return output_path
 
 
@@ -265,11 +298,11 @@ DEFAULT_CONFIG = {
         },
     },
     "visualizer": {
-        "type": "eq_bars", "position": "bottom", "color": "#ffffff",
-        "opacity": 0.85, "bar_count": 64, "height": 120,
+        "type": "eq_bars", "position": "bottom", "color": "#6f8cff",
+        "opacity": 0.9, "bar_count": 48, "height": 104,
         "smoothing": 0.3, "mirror": False, "gradient": True,
-        "bar_width": 0, "bar_gap": 2, "min_height": 1,
-        "sensitivity": 1.0, "corner_radius": 2, "glow": 0,
+        "bar_width": 0, "bar_gap": 4, "min_height": 2,
+        "sensitivity": 1.0, "corner_radius": 4, "glow": 3,
         "decay": 0.82,
         "line_width": 2,
         "x": 0, "y": 0, "width": 0, "height_override": 0,
@@ -293,6 +326,11 @@ DEFAULT_CONFIG = {
         "color": "#ffffff", "background_color": "#333333", "margin": 30,
     },
     "fade": {"fade_in_duration": 2.0, "fade_out_duration": 3.0},
+    "visibility": {
+        "enabled": False, "turn_off_after": 0.0,
+        "restore_before_end": 0.0, "restore": False,
+        "black_color": "#000000",
+    },
 }
 
 
@@ -659,14 +697,14 @@ def get_waveform_frame(
 
     xs = np.arange(n_pixels)
     ys_top = center_y - y_offsets
-    points_top = list(zip(xs.tolist(), ys_top.tolist()))
+    points_top = list(zip(xs.tolist(), ys_top.tolist(), strict=False))
     r, g, b = color_rgb
     draw.line(
         points_top, fill=(r, g, b, 200), width=max(1, int(line_width))
     )
 
     ys_bot = center_y + y_offsets
-    points_bot = list(zip(xs.tolist(), ys_bot.tolist()))
+    points_bot = list(zip(xs.tolist(), ys_bot.tolist(), strict=False))
     draw.line(
         points_bot, fill=(r, g, b, 120),
         width=max(1, int(line_width) // 2),
@@ -735,7 +773,7 @@ def get_circles_frame(
     cx, cy = width // 2, height // 2
     r, g, b = color_rgb
 
-    for i, e in enumerate(energies):
+    for e in energies:
         radius = int(20 + e * min(width, height) * 0.35)
         alpha = int(60 + 195 * e)
         line_w = max(1, int(line_width + e * line_width))
@@ -1000,7 +1038,9 @@ class LiveFrameRenderer:
         self.bar_color = hex_to_rgb(self.pcfg['color'])
         self.bar_bg = hex_to_rgb(self.pcfg['background_color'])
 
-        self.track_viz_max = {a.filename: track_reference_max(a.stft_magnitudes) for a in analyses}
+        self.track_viz_max = [
+            track_reference_max(a.stft_magnitudes) for a in analyses
+        ]
 
         self.bg_cache = {
             a.filename: prepare_background(width, height, self.config, a.key, a.mode)
@@ -1009,9 +1049,13 @@ class LiveFrameRenderer:
 
         self.track_boundaries = []
         if timestamps and len(timestamps) == len(analyses):
-            for a, ts in zip(analyses, timestamps):
+            for index, (a, ts) in enumerate(
+                zip(analyses, timestamps, strict=False)
+            ):
                 self.track_boundaries.append({
-                    'start': ts['start_time'], 'end': ts['end_time'], 'analysis': a
+                    'start': ts['start_time'], 'end': ts['end_time'],
+                    'source_start': float(ts.get('source_start', 0.0)),
+                    'analysis': a, 'index': index,
                 })
         else:
             current_time = 0
@@ -1021,7 +1065,10 @@ class LiveFrameRenderer:
                 current_time = track_end
                 if i < len(analyses) - 1:
                     current_time -= crossfade_duration
-                self.track_boundaries.append({'start': track_start, 'end': track_end, 'analysis': a})
+                self.track_boundaries.append({
+                    'start': track_start, 'end': track_end,
+                    'source_start': 0.0, 'analysis': a, 'index': i,
+                })
 
         self.beat_time_cache = {}
         for a in analyses:
@@ -1042,16 +1089,28 @@ class LiveFrameRenderer:
         self.effects_active = any(self.ecfg.get(k) for k in ['bounce', 'shake', 'zoom', 'flash'])
         self.crt_active = self.ecfg.get('crt', False)
 
+        vis = normalize_visibility_settings(self.config.get('visibility', {}))
+        self.visibility_enabled = vis.get('enabled', False)
+        self.initial_visible = vis['turn_off_after']
+        self.ending_visible = vis['restore_before_end']
+        self.visibility_restore = vis['restore']
+        self.visibility_black = vis['black_color']
+
         self._clip_images = []
         self._clip_enabled = self.config.get('clip_enabled', False)
         self._clip_interval = self.config.get('clip_interval', 1.0)
-        self._clip_interval_unit = self.config.get('clip_interval_unit', '초')
+        self._clip_interval_unit = choice_id(
+            self.config.get('clip_interval_unit', 'seconds'),
+            CLIP_INTERVAL_CHOICES,
+            'seconds',
+        )
         self._clip_random = self.config.get('clip_random', False)
         if self._clip_enabled:
             self._load_clips()
-
         self._static_cache = {}
+        self._bg_only_cache = {}
         self._build_static_layers()
+
 
     def _load_clips(self):
         clips_data = self.config.get('clips', [])
@@ -1075,9 +1134,9 @@ class LiveFrameRenderer:
             import hashlib
             idx = int(hashlib.md5(f"{t:.3f}".encode()).hexdigest(), 16) % n
         else:
-            if self._clip_interval_unit == '박자':
+            if self._clip_interval_unit == 'beat':
                 idx = int(t / max(self._clip_interval, 0.1)) % n
-            elif self._clip_interval_unit == '곡별':
+            elif self._clip_interval_unit == 'per_track':
                 idx = 0
                 for i, tb in enumerate(self.track_boundaries):
                     if tb['start'] <= t < tb['end']:
@@ -1121,28 +1180,43 @@ class LiveFrameRenderer:
         self.effects_active = any(self.ecfg.get(k) for k in ['bounce', 'shake', 'zoom', 'flash'])
         self.crt_active = self.ecfg.get('crt', False)
 
+        vis = normalize_visibility_settings(self.config.get('visibility', {}))
+        self.visibility_enabled = vis.get('enabled', False)
+        self.initial_visible = vis['turn_off_after']
+        self.ending_visible = vis['restore_before_end']
+        self.visibility_restore = vis['restore']
+        self.visibility_black = vis['black_color']
+
         self._clip_enabled = self.config.get('clip_enabled', False)
         self._clip_interval = self.config.get('clip_interval', 1.0)
-        self._clip_interval_unit = self.config.get('clip_interval_unit', '초')
+        self._clip_interval_unit = choice_id(
+            self.config.get('clip_interval_unit', 'seconds'),
+            CLIP_INTERVAL_CHOICES,
+            'seconds',
+        )
         self._clip_random = self.config.get('clip_random', False)
         self._clip_images = []
         if self._clip_enabled:
             self._load_clips()
 
         self._static_cache = {}
+        self._bg_only_cache = {}
         self._build_static_layers()
 
     def _build_static_layers(self):
         """트랙당 배경+텍스트 오버레이를 한 번만 렌더링해서 캐싱.
         매 프레임마다 배경 복사+텍스트 그리는 비용을 제거한다."""
         width, height = self.width, self.height
-        vcfg, tcfg = self.vcfg, self.tcfg
+        tcfg = self.tcfg
         font_title, font_sub = self.font_title, self.font_sub
         text_color, shadow_c = self.text_color, self.shadow_c
 
         for tb in self.track_boundaries:
             a = tb['analysis']
             if a.filename in self._static_cache:
+                if a.filename not in self._bg_only_cache:
+                    bg_only = self.bg_cache[a.filename].copy()
+                    self._bg_only_cache[a.filename] = np.array(bg_only.convert('RGB'))
                 continue
 
             bg = self.bg_cache[a.filename].copy()
@@ -1153,12 +1227,12 @@ class LiveFrameRenderer:
             text_x = int(float(tcfg.get('x', 0.5)) * width)
             text_align = tcfg.get('align', 'center')
 
-            def aligned_x(text_width):
-                if text_align == 'left':
-                    return text_x
-                if text_align == 'right':
-                    return text_x - text_width
-                return text_x - text_width // 2
+            def aligned_x(text_width, align=text_align, x=text_x):
+                if align == 'left':
+                    return x
+                if align == 'right':
+                    return x - text_width
+                return x - text_width // 2
 
             if tcfg['position'] == 'center':
                 base_y = int(float(tcfg.get('y', 0.5)) * height) - 60
@@ -1166,7 +1240,7 @@ class LiveFrameRenderer:
                 base_y = 80
 
             if tcfg['show_title']:
-                title = a.filename
+                title = os.path.splitext(a.filename)[0] if tcfg.get('strip_extension', True) else a.filename
                 if len(title) > 40:
                     title = title[:37] + "..."
                 bbox = draw.textbbox((0, 0), title, font=font_title)
@@ -1266,6 +1340,9 @@ class LiveFrameRenderer:
 
             self._static_cache[a.filename] = np.array(bg.convert('RGB'))
 
+            bg_only = self.bg_cache[a.filename].copy()
+            self._bg_only_cache[a.filename] = np.array(bg_only.convert('RGB'))
+
     def track_at(self, t):
         idx = 0
         for i, tb in enumerate(self.track_boundaries):
@@ -1292,17 +1369,34 @@ class LiveFrameRenderer:
         current_track_idx = self.track_at(t)
         tb = self.track_boundaries[current_track_idx]
         a = tb['analysis']
-        local_t = t - tb['start']
+        local_t = t - tb['start'] + tb.get('source_start', 0.0)
         progress = local_t / max(tb['end'] - tb['start'], 0.001)
         progress = np.clip(progress, 0, 1)
 
-        # 캐시된 정적 레이어(배경+텍스트)를 복사 — 배경생성+텍스트 그리기 비용 0
-        frame = Image.fromarray(self._static_cache[a.filename].copy())
+        _render_visuals = should_render_visuals(
+            t, total_duration,
+            initial_visible_duration=self.initial_visible,
+            ending_visible_duration=self.ending_visible,
+            visibility_enabled=self.visibility_enabled,
+            restore_before_end=self.visibility_restore,
+        )
 
-        if self._clip_enabled:
+        if _render_visuals:
+            frame = Image.fromarray(self._static_cache[a.filename].copy())
+        else:
+            frame = Image.new('RGB', (width, height), self.visibility_black)
+
+        if _render_visuals and self._clip_enabled:
             clip_frame = self._get_clip_frame(t)
             if clip_frame is not None:
                 frame.paste(clip_frame, (0, 0))
+
+        if not _render_visuals:
+            frame_arr = np.array(frame.convert('RGB'))
+            frame_arr = apply_fade(frame_arr, t,
+                                   fcfg['fade_in_duration'], fcfg['fade_out_duration'],
+                                   total_duration)
+            return frame_arr
 
         # --- Visualizer ---
         if vcfg['type'] != 'none' and a.stft_magnitudes.size > 0:
@@ -1322,7 +1416,7 @@ class LiveFrameRenderer:
                     else:
                         vy = height - bar_h_actual
 
-                cached_key = f"{a.filename}_eq"
+                cached_key = f"{tb['index']}_eq"
                 prev = smooth_cache.get(cached_key)
                 last_t = self._smooth_times.get(cached_key)
                 delta_t = (
@@ -1344,7 +1438,7 @@ class LiveFrameRenderer:
                     a.stft_magnitudes, local_t, a.sr, a.hop_length,
                     vcfg['bar_count'], bar_h_actual, vw,
                     viz_color, time_smoothing, prev,
-                    track_max=track_viz_max.get(a.filename),
+                    track_max=track_viz_max[tb['index']],
                     bar_width_override=vcfg.get('bar_width', 0),
                     gap=vcfg.get('bar_gap', 2),
                     min_height=vcfg.get('min_height', 1),
@@ -1358,16 +1452,18 @@ class LiveFrameRenderer:
                 self._smooth_times[cached_key] = local_t
 
                 if vcfg['gradient']:
-                    grad = Image.new('RGBA', (vw, bar_h_actual), (0, 0, 0, 0))
-                    gd = ImageDraw.Draw(grad)
-                    for y in range(bar_h_actual):
-                        alpha = int(255 * (1 - y / bar_h_actual) * 0.6)
-                        gd.line([(0, y), (vw, y)], fill=(0, 0, 0, alpha))
+                    ramp = Image.linear_gradient('L').resize(
+                        (vw, bar_h_actual)
+                    )
                     if vcfg['position'] == 'top':
-                        viz_layer = Image.alpha_composite(viz_layer, grad)
-                    else:
-                        flipped = grad.transpose(Image.FLIP_TOP_BOTTOM)
-                        viz_layer = Image.alpha_composite(viz_layer, flipped)
+                        ramp = ramp.transpose(Image.FLIP_TOP_BOTTOM)
+                    # Keep the quiet end visible while giving each bar a
+                    # cleaner luminous edge instead of a muddy black overlay.
+                    ramp = ramp.point(lambda value: 128 + value // 2)
+                    alpha = ImageChops.multiply(
+                        viz_layer.getchannel('A'), ramp
+                    )
+                    viz_layer.putalpha(alpha)
 
                 if vcfg.get('invert'):
                     viz_layer = viz_layer.transpose(Image.FLIP_TOP_BOTTOM)
@@ -1382,16 +1478,18 @@ class LiveFrameRenderer:
 
             elif vcfg['type'] == 'waveform':
                 wh = int(vcfg['height'])
+                ww = int(vcfg.get('width', 0)) or width
+                wx = int(vcfg.get('x', 0))
+                wy = int(vcfg.get('y', 0))
                 wf = get_waveform_frame(
-                    a.waveform, local_t, a.sr, width, wh, viz_color,
+                    a.waveform, local_t, a.sr, ww, wh, viz_color,
                     line_width=vcfg.get('line_width', 2),
                 )
-                if vcfg['position'] == 'top':
-                    frame.paste(wf, (0, 0), wf)
-                elif vcfg['position'] == 'center':
-                    frame.paste(wf, (0, (height - wh) // 2), wf)
-                else:
-                    frame.paste(wf, (0, height - wh), wf)
+                if wy == 0:
+                    wy = (0 if vcfg['position'] == 'top' else
+                          (height - wh) // 2 if vcfg['position'] == 'center'
+                          else height - wh)
+                frame.paste(wf, (wx, wy), wf)
 
             elif vcfg['type'] == 'spectrum':
                 sh = int(vcfg.get('height_override', 0)) or int(vcfg['height'])
@@ -1405,7 +1503,7 @@ class LiveFrameRenderer:
                         sy = (height - sh) // 2
                     else:
                         sy = height - sh
-                spectrum_key = f"{a.filename}_spectrum"
+                spectrum_key = f"{tb['index']}_spectrum"
                 previous_spectrum = smooth_cache.get(spectrum_key)
                 spectrum_last_t = self._smooth_times.get(spectrum_key)
                 spectrum_delta = (
@@ -1417,7 +1515,7 @@ class LiveFrameRenderer:
                 ) ** max(0.001, spectrum_delta * 60)
                 spec, spectrum_values = get_spectrum_frame(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length, sw, sh, viz_color,
-                    track_max=track_viz_max.get(a.filename),
+                    track_max=track_viz_max[tb['index']],
                     smoothing=spectrum_smoothing,
                     prev_vals=previous_spectrum,
                 )
@@ -1427,7 +1525,9 @@ class LiveFrameRenderer:
 
             elif vcfg['type'] == 'circles':
                 ch = int(vcfg['height']) * 2
-                circle_key = f"{a.filename}_circles"
+                cw = int(vcfg.get('width', 0)) or width
+                cx = int(vcfg.get('x', 0))
+                circle_key = f"{tb['index']}_circles"
                 previous_circles = smooth_cache.get(circle_key)
                 circle_last_t = self._smooth_times.get(circle_key)
                 circle_delta = (
@@ -1439,20 +1539,22 @@ class LiveFrameRenderer:
                 ) ** max(0.001, circle_delta * 60)
                 circles, circle_values = get_circles_frame(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length,
-                    width, ch, viz_color,
-                    track_max=track_viz_max.get(a.filename),
+                    cw, ch, viz_color,
+                    track_max=track_viz_max[tb['index']],
                     smoothing=circle_smoothing,
                     prev_energy=previous_circles,
                     line_width=vcfg.get('line_width', 2),
                 )
                 smooth_cache[circle_key] = circle_values
                 self._smooth_times[circle_key] = local_t
-                cy_pos = (height - int(ch)) // 2
-                frame.paste(circles, (0, cy_pos), circles)
+                cy_pos = int(vcfg.get('y', 0)) or (height - int(ch)) // 2
+                frame.paste(circles, (cx, cy_pos), circles)
 
             elif vcfg['type'] == 'radial':
                 rh = int(vcfg['height']) * 2
-                cached_key_r = f"{a.filename}_radial"
+                rw = int(vcfg.get('width', 0)) or width
+                rx = int(vcfg.get('x', 0))
+                cached_key_r = f"{tb['index']}_radial"
                 prev_r = smooth_cache.get(cached_key_r)
                 last_r_t = self._smooth_times.get(cached_key_r)
                 delta_r_t = (
@@ -1468,14 +1570,14 @@ class LiveFrameRenderer:
                 radial, curr_r = get_radial_bars(
                     a.stft_magnitudes, local_t, a.sr, a.hop_length,
                     vcfg['bar_count'], vcfg['height'],
-                    width, rh, viz_color, radial_smoothing, prev_r,
-                    track_max=track_viz_max.get(a.filename),
+                    rw, rh, viz_color, radial_smoothing, prev_r,
+                    track_max=track_viz_max[tb['index']],
                     line_width=vcfg.get('line_width', 2),
                 )
                 smooth_cache[cached_key_r] = curr_r
                 self._smooth_times[cached_key_r] = local_t
-                ry = (height - int(rh)) // 2
-                frame.paste(radial, (0, ry), radial)
+                ry = int(vcfg.get('y', 0)) or (height - int(rh)) // 2
+                frame.paste(radial, (rx, ry), radial)
 
         # --- Progress bar + Time display (동적 요소만) ---
         draw = ImageDraw.Draw(frame)
@@ -1536,18 +1638,20 @@ def generate_video(analyses, mixed_audio_path, output_path,
                    timestamps=None, timestamp_duration=8.0, crossfade_duration=4.0,
                    frame_progress_callback=None, fps=24,
                    video_codec='auto', audio_codec='aac',
-                   video_bitrate='5000k', audio_bitrate='192k'):
-    print("\n영상 생성 시작...")
+                   video_bitrate='5000k', audio_bitrate='320k'):
+    print(t("video.renderStarting"), end="", flush=True)
 
     if not os.path.isfile(mixed_audio_path):
-        raise FileNotFoundError(f"믹스 오디오 파일을 찾을 수 없습니다: {mixed_audio_path}")
+        raise FileNotFoundError(t("video.mixedAudioNotFound", path=mixed_audio_path))
 
     try:
         total_duration = float(sf.info(mixed_audio_path).duration)
     except Exception:
         audio_clip = AudioFileClip(mixed_audio_path)
         if audio_clip is None:
-            raise RuntimeError(f"오디오 파일을 열 수 없습니다: {mixed_audio_path}")
+            raise RuntimeError(
+                t("video.mixedAudioReadError", path=mixed_audio_path)
+            ) from None
         total_duration = audio_clip.duration
         audio_clip.close()
     fps = fps if fps else 24
@@ -1564,7 +1668,7 @@ def generate_video(analyses, mixed_audio_path, output_path,
         active_fx = [k for k in ['bounce', 'shake', 'zoom', 'flash'] if ecfg.get(k)]
         if renderer.crt_active:
             active_fx.append('crt')
-        print(f"  이펙트: {', '.join(active_fx)}")
+        print(f"  효과: {', '.join(active_fx)}")
     print(f"  총 길이: {total_duration:.1f}s | 해상도: {width}x{height} | FPS: {fps}")
 
     _total_frames = max(1, math.ceil(total_duration * fps))
@@ -1576,16 +1680,11 @@ def generate_video(analyses, mixed_audio_path, output_path,
 
     ffmpeg_path = None
     try:
-        ffmpeg_path = _find_ffmpeg_exe()
+        ffmpeg_path = resolve_ffmpeg_executable()
     except Exception:
         pass
     if not ffmpeg_path or not os.path.isfile(ffmpeg_path):
-        raise RuntimeError(
-            "ffmpeg 실행 파일을 찾을 수 없습니다.\n"
-            "PyInstaller 번들에서 빌드했다면 "
-            "'--collect-all imageio_ffmpeg' 옵션으로 다시 빌드하세요.\n"
-            "또는 시스템 PATH에 ffmpeg를 설치하세요."
-        )
+        raise RuntimeError(t("video.ffmpegBundle"))
 
     output_dir = os.path.dirname(os.path.abspath(output_path))
     if output_dir and not os.path.isdir(output_dir):
@@ -1602,8 +1701,8 @@ def generate_video(analyses, mixed_audio_path, output_path,
     if width < 146 or height < 146:
         codec = 'libx264'
     cpu_count = os.cpu_count() or 4
-    gpu_msg = f"GPU 인코딩 ({codec})" if codec != 'libx264' else "CPU 인코딩 (libx264)"
-    print(f"  렌더링 중... | {gpu_msg} | 스레드: {cpu_count} | (시간이 걸릴 수 있습니다)")
+    gpu_msg = t("video.codecGpu", codec=codec) if codec != 'libx264' else t("video.codecCpu")
+    print(f"  {t('video.renderingStatus', msg=gpu_msg, threads=cpu_count)}")
 
     def _encode(selected_codec, active_renderer):
         temp_output = output_path + ".partial.mp4"
@@ -1625,6 +1724,14 @@ def generate_video(analyses, mixed_audio_path, output_path,
             stderr=subprocess.PIPE,
             creationflags=_NO_WINDOW,
         )
+        stderr_chunks = []
+        stderr_lock = threading.Lock()
+        def _drain_stderr():
+            for line in iter(process.stderr.readline, b''):
+                with stderr_lock:
+                    stderr_chunks.append(line)
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
         try:
             for frame_index in range(_total_frames):
                 frame = active_renderer.render_frame(frame_index / fps)
@@ -1632,10 +1739,12 @@ def generate_video(analyses, mixed_audio_path, output_path,
                 if frame_progress_callback:
                     frame_progress_callback(frame_index + 1, _total_frames)
             process.stdin.close()
-            stderr = process.stderr.read().decode('utf-8', errors='replace')
             return_code = process.wait()
+            stderr_thread.join(timeout=5)
+            with stderr_lock:
+                stderr_text = b''.join(stderr_chunks).decode('utf-8', errors='replace')
             if return_code:
-                raise RuntimeError(stderr.strip() or "FFmpeg 영상 인코딩 실패")
+                raise RuntimeError(stderr_text.strip() or t("video.renderFailed"))
             os.replace(temp_output, output_path)
         except Exception:
             if process.poll() is None:
@@ -1651,6 +1760,8 @@ def generate_video(analyses, mixed_audio_path, output_path,
                     pass
             raise
         finally:
+            if stderr_thread.is_alive():
+                stderr_thread.join(timeout=2)
             for stream in (process.stdin, process.stderr):
                 if stream and not stream.closed:
                     try:

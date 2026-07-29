@@ -25,6 +25,7 @@ import json
 from analyzer import analyze_track, find_compatible_transition
 from transition import create_mixed_audio, load_audio_pydub
 from video_gen import generate_video
+from i18n import t
 
 
 AUDIO_EXTS = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.aiff'}
@@ -49,31 +50,31 @@ def parse_tracklist(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
-            if line and not line.startswith('#'):
-                if os.path.exists(line):
-                    tracks.append(line)
+            if line and not line.startswith('#') and os.path.exists(line):
+                tracks.append(line)
     return tracks
 
 
 def print_analysis_summary(analyses):
     print("\n" + "=" * 70)
-    print("  분석 결과 요약")
+    print(t("mixer.analysisSummary"))
     print("=" * 70)
 
     for i, a in enumerate(analyses):
-        mode_str = "메이저" if a.mode == 'major' else "마이너"
+        mode_str = t("mixer.major") if a.mode == 'major' else t("mixer.minor")
         dur_m = int(a.duration // 60)
         dur_s = int(a.duration % 60)
-        print(f"  [{i+1:2d}] {a.filename}")
-        print(f"       BPM: {a.bpm:6.1f} | 키: {a.key} {mode_str} ({a.camelot}) | 길이: {dur_m}:{dur_s:02d}")
+        print(t("mixer.trackHeader", idx=i+1, filename=a.filename))
+        print(t("mixer.analysisLine", bpm=a.bpm, key=a.key, mode=mode_str, camelot=a.camelot, dur_m=dur_m, dur_s=dur_s))
 
-    print("\n  트랜지션 호환성:")
+    print("\n" + t("mixer.transitionCompatibility"))
     for i in range(len(analyses) - 1):
         compat = find_compatible_transition(analyses[i], analyses[i+1])
         rating = "★★★" if compat['score'] >= 60 else ("★★☆" if compat['score'] >= 40 else "★☆☆")
-        print(f"  [{i+1:2d}→{i+2:2d}] {analyses[i].filename[:25]:25s} → {analyses[i+1].filename[:25]:25s}")
-        print(f"         BPM 차이: {compat['bpm_diff']:.1f} | 키 거리: {compat['key_distance']} | "
-              f"점수: {compat['score']:.0f} {rating}")
+        idx1 = i+1; idx2 = i+2
+        name1 = analyses[i].filename[:25]; name2 = analyses[i+1].filename[:25]
+        print(t("mixer.compatHeader", idx1=idx1, idx2=idx2, name1=name1, name2=name2))
+        print(t("mixer.compatDetails", bpm_diff=compat['bpm_diff'], key_dist=compat['key_distance'], score=compat['score'], rating=rating))
 
     print("=" * 70)
 
@@ -130,66 +131,65 @@ def main():
     if args.tracklist:
         tracks = parse_tracklist(args.tracklist)
         if not tracks:
-            print(f"오류: 트랙 리스트 파일에서 음악 파일을 찾을 수 없습니다: {args.tracklist}")
+            print(t("errors.noTracksInList", path=args.tracklist))
             sys.exit(1)
     elif args.dir:
         tracks = find_audio_files(args.dir)
         if not tracks:
-            print(f"오류: 디렉토리에서 음악 파일을 찾을 수 없습니다: {args.dir}")
+            print(t("errors.noTracksInDir", path=args.dir))
             sys.exit(1)
     elif args.files:
         for f in args.files:
             found = find_audio_files(f)
             tracks.extend(found)
         if not tracks:
-            print(f"오류: 지정된 파일에서 음악 파일을 찾을 수 없습니다.")
+            print(t("errors.noTracksInFiles"))
             sys.exit(1)
     else:
         parser.print_help()
         sys.exit(1)
 
-    print(f"\n🎵 Music Mixer")
-    print(f"   {len(tracks)}개 파일 로드됨\n")
+    print("\n🎵 Music Mixer")
+    print(t("mixer.filesLoaded", count=len(tracks)))
 
-    print("음악 분석 중...")
+    print(t("mixer.analyzing"))
     start_time = time.time()
     analyses = []
     tracks_data = []
 
-    for i, filepath in enumerate(tracks):
+    for filepath in tracks:
         try:
             analysis = analyze_track(filepath)
             analyses.append(analysis)
             samples, sr = load_audio_pydub(filepath)
             tracks_data.append((samples, sr))
         except Exception as e:
-            print(f"  ⚠ 분석 실패: {filepath} - {e}")
+            print(t("mixer.analysisFailed", filepath=filepath, error=e))
             continue
 
     if not analyses:
-        print("오류: 분석할 수 있는 음악 파일이 없습니다.")
+        print(t("errors.noAnalyzableFiles"))
         sys.exit(1)
 
     elapsed = time.time() - start_time
-    print(f"\n분석 완료! ({elapsed:.1f}초 소요)")
+    print(t("mixer.analysisComplete", elapsed=elapsed))
 
     if args.order == 'bpm':
         indices = sorted(range(len(analyses)), key=lambda i: analyses[i].bpm)
         analyses = [analyses[i] for i in indices]
         tracks_data = [tracks_data[i] for i in indices]
-        print("BPM 순으로 정렬됨")
+        print(t("mixer.sortedByBpm"))
     elif args.order == 'key':
-        from analyzer import CAMELOT
         indices = sorted(range(len(analyses)),
                          key=lambda i: (analyses[i].camelot[-1], int(analyses[i].camelot[:-1])))
         analyses = [analyses[i] for i in indices]
         tracks_data = [tracks_data[i] for i in indices]
-        print("캠롯 휠 순으로 정렬됨")
+        print(t("mixer.sortedByKey"))
     elif args.order == 'smart':
         indices = _smart_order(analyses)
         analyses = [analyses[i] for i in indices]
         tracks_data = [tracks_data[i] for i in indices]
-        print("스마트 정렬됨 (호환성 최적화)")
+        print(t("mixer.sortedSmart"))
 
     print_analysis_summary(analyses)
 
@@ -207,10 +207,10 @@ def main():
         json_path = os.path.splitext(args.output)[0] + '_analysis.json'
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(json_data, f, indent=2, ensure_ascii=False)
-        print(f"\n분석 결과 저장: {json_path}")
+        print(t("mixer.analysisSaved", path=json_path))
 
     if args.info:
-        print("\n--info 모드: 분석 정보만 출력합니다.")
+        print(t("mixer.infoMode"))
         return
 
     output_dir = os.path.dirname(args.output) or '.'
@@ -222,7 +222,7 @@ def main():
 
     txt_output = os.path.splitext(args.output)[0] + '_timestamps.txt'
     _save_timestamps_txt(txt_output, timestamps, total_duration)
-    print(f"타임스탬프 저장: {txt_output}")
+    print(t("mixer.timestampsSaved", path=txt_output))
 
     if args.video:
         res_map = {'720p': (1280, 720), '1080p': (1920, 1080), '4k': (3840, 2160)}
@@ -238,7 +238,6 @@ def main():
            args.no_key or args.show_camelot or args.no_progress or \
            args.fade_in is not None or args.fade_out is not None:
 
-            import shutil
             tmp_config = os.path.join(os.environ.get('TEMP', '.'),
                                        'mixer_visual_config.json')
             base_config = {}
@@ -302,23 +301,23 @@ def main():
                        timestamps=timestamps, crossfade_duration=args.crossfade)
 
     print("\n" + "=" * 40)
-    print("  완료!")
+    print(t("mixer.complete"))
     print("=" * 40)
-    print(f"  출력 오디오: {audio_output}")
+    print(t("mixer.outputAudio", path=audio_output))
     if args.video:
-        print(f"  출력 영상: {video_output}")
-    print(f"  총 길이: {total_duration:.1f}s ({total_duration/60:.1f}분)")
-    print(f"  트랙 수: {len(analyses)}")
+        print(t("mixer.outputVideo", path=video_output))
+    print(t("mixer.totalDuration", duration=total_duration, minutes=total_duration/60))
+    print(t("mixer.trackCount", count=len(analyses)))
 
 
 def _save_timestamps_txt(filepath, timestamps, total_duration):
     lines = []
     lines.append("=" * 55)
-    lines.append("  TRACK LIST / 타임스탬프")
+    lines.append(t("mixer.tsHeader"))
     lines.append("=" * 55)
     lines.append("")
 
-    for i, ts in enumerate(timestamps):
+    for ts in timestamps:
         start = ts.get('start_time', 0)
         end = ts.get('end_time', 0)
         sm = int(start // 60)
@@ -334,15 +333,15 @@ def _save_timestamps_txt(filepath, timestamps, total_duration):
 
         lines.append(f"  [{sm:02d}:{ss:02d}] {filename}")
         lines.append(f"          BPM: {bpm:.0f}  |  Key: {key} {mode}  |  Camelot: {camelot}")
-        lines.append(f"          구간: {sm:02d}:{ss:02d} ~ {em:02d}:{es:02d}")
+        lines.append(t("mixer.tsRange", sm=sm, ss=ss, em=em, es=es))
         if ts.get('transition_from'):
-            lines.append(f"          ← {ts['transition_from']} 에서 전환")
+            lines.append(t("mixer.tsTransition", from_track=ts['transition_from']))
         lines.append("")
 
     lines.append("-" * 55)
     tm = int(total_duration // 60)
     ts_s = int(total_duration % 60)
-    lines.append(f"  총 길이: {tm:02d}:{ts_s:02d}  |  트랙 수: {len(timestamps)}")
+    lines.append(t("mixer.tsTotal", tm=tm, ts_s=ts_s, count=len(timestamps)))
     lines.append("=" * 55)
 
     with open(filepath, 'w', encoding='utf-8') as f:

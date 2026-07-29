@@ -4,7 +4,7 @@ import random
 import os
 import re
 import numpy as np
-from itertools import combinations
+from i18n import t
 
 
 def bpm_range_label(bpm):
@@ -24,16 +24,13 @@ def diversity_score(group):
 
     bpms = [t['analysis'].bpm for t in group]
     keys = [t['analysis'].key for t in group]
-    modes = [t['analysis'].mode for t in group]
-
     bpm_std = np.std(bpms) if len(bpms) > 1 else 0
     bpm_spread = max(bpms) - min(bpms) if len(bpms) > 1 else 0
 
     unique_keys = len(set(keys))
-    unique_modes = len(set(modes))
     key_variety = unique_keys / max(len(keys), 1)
 
-    ranges = set(bpm_range_label(b) for b in bpms)
+    ranges = {bpm_range_label(b) for b in bpms}
     range_variety = len(ranges) / max(len(bpms), 1)
 
     score = 0
@@ -96,7 +93,10 @@ def sequence_score(group, preset="balanced", avoid_same_artist=True):
         for t in group
     ]
     if preset == "build_up":
-        score += sum(4 if b >= a else -4 for a, b in zip(energies, energies[1:]))
+        score += sum(
+            4 if b >= a else -4
+            for a, b in zip(energies, energies[1:], strict=False)
+        )
     elif preset == "calm":
         score -= np.std(energies) * 100
     elif preset == "peak_middle" and len(energies) >= 3:
@@ -104,7 +104,10 @@ def sequence_score(group, preset="balanced", avoid_same_artist=True):
         score += max(0, 20 - abs(peak_index - (len(energies) - 1) / 2) * 5)
     if avoid_same_artist:
         artists = [_artist_name(t) for t in group]
-        score += sum(-25 if a and a == b else 2 for a, b in zip(artists, artists[1:]))
+        score += sum(
+            -25 if a and a == b else 2
+            for a, b in zip(artists, artists[1:], strict=False)
+        )
     return score
 
 
@@ -112,31 +115,31 @@ def distribute_tracks(tracks, target_seconds=3600.0, tolerance=0.10,
                       max_videos=10, seed=None, progress_callback=None,
                       preset="balanced", avoid_same_artist=True):
     if target_seconds <= 0:
-        raise ValueError("목표 영상 길이는 0초보다 커야 합니다.")
+        raise ValueError(t("distributor.targetDurationError"))
     if not 0 <= tolerance < 1:
-        raise ValueError("허용 오차는 0 이상 1 미만이어야 합니다.")
+        raise ValueError(t("distributor.toleranceError"))
     if max_videos < 1:
-        raise ValueError("최대 영상 수는 1개 이상이어야 합니다.")
+        raise ValueError(t("distributor.maxGroupsError"))
 
     # Keep seeded runs reproducible without mutating process-wide randomness.
     rng = random.Random(seed)
 
-    audio_tracks = [t for t in tracks if hasattr(t, 'analysis') and t.analysis is not None]
+    audio_tracks = [tr for tr in tracks if hasattr(tr, 'analysis') and tr.analysis is not None]
     if not audio_tracks:
         return []
 
     track_infos = []
-    for t in audio_tracks:
-        has_trim = t.trim_end > t.trim_start
-        duration = t.trim_end - t.trim_start if has_trim else t.duration
+    for tr in audio_tracks:
+        has_trim = tr.trim_end > tr.trim_start
+        duration = tr.trim_end - tr.trim_start if has_trim else tr.duration
         track_infos.append({
-            'track': t,
-            'analysis': t.analysis,
+            'track': tr,
+            'analysis': tr.analysis,
             'duration': duration,
-            'filename': t.filename,
-            'filepath': t.filepath,
-            'trim_start': t.trim_start if has_trim else 0.0,
-            'trim_end': t.trim_end if has_trim else t.duration,
+            'filename': tr.filename,
+            'filepath': tr.filepath,
+            'trim_start': tr.trim_start if has_trim else 0.0,
+            'trim_end': tr.trim_end if has_trim else tr.duration,
         })
 
     track_infos.sort(key=lambda x: x['analysis'].bpm)
@@ -150,7 +153,7 @@ def distribute_tracks(tracks, target_seconds=3600.0, tolerance=0.10,
     total_attempts = min(200, max(50, len(track_infos) * 5))
     for attempt in range(total_attempts):
         if progress_callback:
-            progress_callback(attempt, total_attempts, "최적 분배 탐색 중...")
+            progress_callback(attempt, total_attempts, t("distributor.searching"))
         shuffled = track_infos[:]
         if attempt == 0:
             pass
@@ -180,7 +183,7 @@ def distribute_tracks(tracks, target_seconds=3600.0, tolerance=0.10,
             best_groups = groups
 
     if progress_callback:
-        progress_callback(total_attempts, total_attempts, "결과 정리 중...")
+        progress_callback(total_attempts, total_attempts, t("distributor.cleaning"))
 
     result = []
     for i, group in enumerate(best_groups):
@@ -203,7 +206,7 @@ def _greedy_fill(remaining_tracks, target, min_total, max_total, max_videos):
 
     tracks_left = remaining_tracks[:]
 
-    total_available = sum(t['duration'] for t in tracks_left)
+    total_available = sum(track['duration'] for track in tracks_left)
     if total_available <= target:
         return [tracks_left[:]]
 
@@ -212,20 +215,20 @@ def _greedy_fill(remaining_tracks, target, min_total, max_total, max_videos):
         best_idx = -1
         best_fit = -999
 
-        for i, t in enumerate(tracks_left):
-            new_dur = current_duration + t['duration']
+        for i, candidate in enumerate(tracks_left):
+            new_dur = current_duration + candidate['duration']
 
             if new_dur <= max_total:
                 dur_fit = 1.0 - abs(new_dur - target) / target
 
-                temp_group = current_group + [t]
+                temp_group = current_group + [candidate]
                 div = diversity_score(temp_group)
                 harmony = check_harmony_flow(temp_group)
 
                 score = dur_fit * 30 + div * 0.3 + harmony * 0.2
 
                 if best_track is None or score > best_fit:
-                    best_track = t
+                    best_track = candidate
                     best_idx = i
                     best_fit = score
 
@@ -301,7 +304,7 @@ def get_distribution_summary(groups):
         lines.append({
             'index': i + 1,
             'name': g['name'],
-            'duration': f"{int(dur)}초 ({dur_m}분 {dur_s:02d}초)",
+            'duration': t("distributor.durationLine", sec=int(dur), m=dur_m, s=dur_s),
             'duration_sec': dur,
             'track_count': n,
             'bpm_range': bpm_range,

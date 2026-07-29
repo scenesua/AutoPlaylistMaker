@@ -10,10 +10,26 @@ from repeat_settings import (
     build_repeat_plan,
     hms_to_seconds,
 )
+from timeline_utils import should_render_visuals, normalize_visibility_settings
 from video_gen import _find_ffmpeg_exe, loop_video_repetitions
 
 
 class RepeatSettingsTests(unittest.TestCase):
+    def test_visibility_uses_final_timeline_and_optional_restore(self):
+        self.assertTrue(should_render_visuals(179, 600, 180, 120, True, True))
+        self.assertFalse(should_render_visuals(181, 600, 180, 120, True, True))
+        self.assertTrue(should_render_visuals(481, 600, 180, 120, True, True))
+        self.assertFalse(should_render_visuals(599, 600, 180, 120, True, False))
+        self.assertTrue(should_render_visuals(200, 300, 180, 180, True, True))
+
+    def test_legacy_visibility_migrates(self):
+        migrated = normalize_visibility_settings({
+            "enabled": True, "initial_visible": 300,
+            "ending_visible": 180,
+        })
+        self.assertEqual(migrated["turn_off_after"], 300)
+        self.assertEqual(migrated["restore_before_end"], 180)
+        self.assertTrue(migrated["restore"])
     def test_count_mode(self):
         plan = build_repeat_plan(1390, mode=MODE_COUNT, repeat_count=3)
         self.assertEqual(plan.repeat_count, 3)

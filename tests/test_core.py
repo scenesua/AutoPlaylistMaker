@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import shutil
 import tempfile
@@ -12,10 +13,67 @@ from distributor import distribute_tracks, sequence_score
 from project import Project
 from render_jobs import RenderJob
 from transition import apply_edge_fades
-from app import Stage2MusicEdit
+from app import Stage2MusicEdit, _waveform_peaks
 
 
 class CoreTests(unittest.TestCase):
+    def test_waveform_peaks_keep_final_partial_chunk(self):
+        peaks = _waveform_peaks(
+            np.array([-1.0, 0.5, -0.25, 0.75, 0.2]), max_peaks=2
+        )
+        self.assertEqual(peaks, [(-1.0, 0.5), (-0.25, 0.75), (0.2, 0.2)])
+
+    def test_music_editor_reuses_analysis_waveform_without_redecoding(self):
+        stage = object.__new__(Stage2MusicEdit)
+        stage._waveform_cache = {}
+        stage._waveform_loading = set()
+        stage._track_rects = [{
+            'track': {
+                'filepath': 'cached.wav',
+                'analysis': SimpleNamespace(
+                    waveform=np.linspace(-1, 1, 5000),
+                    sr=22050,
+                ),
+            },
+        }]
+        progress = []
+        stage._update_waveform_progress = (
+            lambda ready, total: progress.append((ready, total))
+        )
+        stage._precompute_waveforms()
+        self.assertIn('cached.wav', stage._waveform_cache)
+        self.assertEqual(progress[-1], (1, 1))
+
+    def test_changed_source_invalidates_analysis_cache(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "song.wav")
+            with open(source, "wb") as handle:
+                handle.write(b"first")
+            cache = os.path.join(root, "cache.npz")
+            np.savez_compressed(
+                cache,
+                waveform=np.ones(8),
+                stft_magnitudes=np.ones((4, 3)),
+                stft_times=np.arange(3),
+            )
+            stat = os.stat(source)
+            project = Project()
+            project.project_dir = root
+            project.track_analyses = {
+                os.path.abspath(source): {
+                    "filepath": source,
+                    "filename": "song.wav",
+                    "cache_file": "cache.npz",
+                    "source_size": stat.st_size,
+                    "source_mtime_ns": stat.st_mtime_ns,
+                    "analysis_version": 2,
+                },
+            }
+            self.assertIsNotNone(project.get_analysis_for(source))
+            with open(source, "ab") as handle:
+                handle.write(b"changed")
+            self.assertIsNone(project.get_analysis_for(source))
+
     def test_trim_precision_modifiers(self):
         self.assertAlmostEqual(
             Stage2MusicEdit._snap_drag_delta(0.146, 0), 0.1
@@ -87,7 +145,7 @@ class CoreTests(unittest.TestCase):
             shutil.move(old_dir, moved_dir)
             loaded = Project()
             data = loaded.load(moved_dir)
-            self.assertEqual(data['format_version'], 3)
+            self.assertEqual(data['format_version'], 4)
             self.assertTrue(os.path.isfile(loaded.all_files[0]['original']))
 
     def test_missing_media_can_be_relinked_recursively(self):
@@ -251,6 +309,31 @@ class CoreTests(unittest.TestCase):
                 ],
                 ['b.wav', 'a.wav'],
             )
+
+    def test_legacy_localized_clip_settings_migrate_to_stable_ids(self):
+        with tempfile.TemporaryDirectory() as root:
+            project_file = os.path.join(root, 'project.json')
+            with open(project_file, 'w', encoding='utf-8') as handle:
+                json.dump({
+                    'format_version': 3,
+                    'name': 'legacy-localized',
+                    'files': [],
+                    'track_analyses': {},
+                    'video_groups': [{
+                        'name': 'Mix 1',
+                        'tracks': [],
+                        'clips': [],
+                        'clip_interval_unit': '박자',
+                        'clip_random_base': '캠롯',
+                    }],
+                    'app_state': {},
+                }, handle, ensure_ascii=False)
+
+            restored = Project()
+            restored.load(project_file)
+            group = restored.video_groups[0]
+            self.assertEqual(group['clip_interval_unit'], 'beat')
+            self.assertEqual(group['clip_random_base'], 'camelot')
 
 
 if __name__ == '__main__':

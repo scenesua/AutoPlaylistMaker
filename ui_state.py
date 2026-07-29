@@ -1,11 +1,14 @@
 """Capture and restore page state independently from Tk widget construction."""
 
+import copy
 import tkinter as tk
 
 
 _PLAIN_STATE_FIELDS = {
     "selected_group", "manual_group_idx", "distribute_mode",
-    "tl_sel", "tl_px_per_sec", "playhead_sec",
+    "tl_sel", "tl_px_per_sec", "playhead_sec", "clip_preview_ratio",
+    "active_effect_ids", "effect_card_states",
+    "ambient_tracks",
 }
 
 
@@ -14,6 +17,16 @@ def capture_pages(pages):
     for page in pages:
         variables = {}
         plain = {}
+        if hasattr(page, "effect_cards"):
+            page.effect_card_states = {
+                effect_id: {
+                    "expanded": card.expanded,
+                    "sections": [
+                        section.expanded for section in card.sections
+                    ],
+                }
+                for effect_id, card in page.effect_cards.items()
+            }
         for name, value in vars(page).items():
             if isinstance(value, tk.Variable):
                 try:
@@ -21,7 +34,7 @@ def capture_pages(pages):
                 except tk.TclError:
                     pass
             elif name in _PLAIN_STATE_FIELDS:
-                plain[name] = value
+                plain[name] = copy.deepcopy(value)
         result.append({
             "class": type(page).__name__,
             "variables": variables,
@@ -46,3 +59,5 @@ def restore_pages(pages, states):
         for name, value in state["plain"].items():
             if hasattr(page, name):
                 setattr(page, name, value)
+        if hasattr(page, "_restore_effect_card_state"):
+            page._restore_effect_card_state()

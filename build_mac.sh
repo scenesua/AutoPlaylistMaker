@@ -3,14 +3,12 @@ set -e
 
 cd "$(dirname "$0")"
 
-version="1.2.0"
+version="1.3.0"
 appName="AutoPlaylistMaker_v$version"
 distRoot="./dist"
 bundleDir="$distRoot/$appName.app"
 output="$bundleDir/Contents/MacOS/$appName"
 zipOutput="$distRoot/${appName}_macos.zip"
-
-pythonDlls=$(python3 -c "import sys; print(sys.prefix)")
 
 arguments=(
     "--noconfirm"
@@ -18,8 +16,11 @@ arguments=(
     "--onedir"
     "--windowed"
     "--name" "$appName"
+    "--icon" "app_icon.png"
     "--add-data" "app_icon.png:."
+    "--add-data" "app_splash.png:."
     "--add-data" "visual_config.json:."
+    "--add-data" "locales:locales"
     "--collect-all" "imageio_ffmpeg"
     "--collect-all" "tkinterdnd2"
     "--copy-metadata" "imageio"
@@ -39,6 +40,7 @@ arguments=(
     "--hidden-import" "analyzer"
     "--hidden-import" "transition"
     "--hidden-import" "video_gen"
+    "--hidden-import" "ffmpeg_service"
     "--hidden-import" "project"
     "--hidden-import" "distributor"
     "--hidden-import" "audio_preview"
@@ -47,6 +49,10 @@ arguments=(
     "--hidden-import" "ui_state"
     "--hidden-import" "repeat_settings"
     "--hidden-import" "font_combo"
+    "--hidden-import" "i18n"
+    "--hidden-import" "stage4_design_effects"
+    "--hidden-import" "stage5_render"
+    "--hidden-import" "timeline_utils"
     "app.py"
 )
 
