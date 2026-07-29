@@ -18,10 +18,15 @@
 | ISSUE-BUILD-003 | 확인 필요 | 실제 macOS `.app` 실행·종료 smoke |
 | ISSUE-CI-001 | 보류 | Node 24 지원 action major로 갱신 |
 | ISSUE-UI-003 | 부분 구현 | 효과 category submenu·edge flip 구현 여부 결정 |
+| ISSUE-UI-004 | 사용자 보고·재현 필요 | 테마 전환 뒤 사라지는 UI 요소 복구 |
+| ISSUE-PROJECT-001 | 사용자 보고·재현 필요 | 프로젝트 이름 지정과 저장 흐름 복구 |
+| ISSUE-NAV-001 | 사용자 보고·재현 필요 | `다음` 단계 이동 차단 복구 |
+| ISSUE-ANALYSIS-001 | 사용자 보고·재현 필요 | 분석 진행 창 수명주기와 취소 피드백 복구 |
 
 ## 1.3.1 이월 요약
 
-- 최우선: ISSUE-PERF-001, ISSUE-DATA-001
+- 최우선 차단 회귀: ISSUE-PROJECT-001, ISSUE-NAV-001, ISSUE-UI-004, ISSUE-ANALYSIS-001
+- 최적화·데이터: ISSUE-PERF-001, ISSUE-DATA-001
 - 기능 회귀 검증: ISSUE-TEST-001, ISSUE-BUILD-003, 실제 GPU encoder
 - UI 마감: ISSUE-UI-003, 모든 DPI·장문 locale
 - 유지보수: ISSUE-ARCH-001, ISSUE-BUILD-002, ISSUE-CI-001

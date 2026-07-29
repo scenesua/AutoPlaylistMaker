@@ -59,6 +59,15 @@ Windows와 macOS 패키지, FFmpeg 설치 스크립트가 포함되어 있습니
 - 밝은 모드 버튼 대비, 상단 내비게이션 색상, Stage 5 회색 테두리 문제
 - 반복 영상 전체 길이에 환경음이 이어지지 않던 문제
 
+### ⚠️ 릴리스 후 확인된 주요 문제
+
+아래 문제는 v1.3.0 배포 후 일부 작업 흐름에서 확인됐으며, 현재 정확한 재현 범위를 점검하고 있습니다. 프로젝트 진행을 막을 수 있는 항목부터 v1.3.1에서 우선 수정할 예정입니다.
+
+- 다크 모드와 라이트 모드를 서로 전환한 뒤 일부 화면 요소가 사라지거나 다시 그려지지 않을 수 있습니다.
+- 새 프로젝트에서 프로젝트 이름을 확정하지 못하거나 저장이 정상적으로 완료되지 않을 수 있습니다.
+- 상단의 `다음` 동작이 반응하지 않아 다음 작업 단계로 이동하지 못할 수 있습니다.
+- 음원 분석을 시작하면 진행 상황을 보여주는 창이 먼저 닫히고, 분석만 백그라운드에서 계속되어 진행 상태와 취소 여부를 확인하기 어려울 수 있습니다.
+
 ### 📦 다운로드 및 설치
 
 - **Windows**: `AutoPlaylistMaker_v1.3.0_windows_x64.zip`
@@ -130,6 +139,15 @@ Version 1.3.0 is a major workflow update across music editing, distribution, cli
 - Light-mode button contrast, navigation colors, and Stage 5 gray border
 - Ambient audio ending before the full repeated video timeline
 
+### ⚠️ Known Issues Identified After Release
+
+The following issues were reported in some v1.3.0 workflows after release. Their exact scope is being reproduced, and fixes that block normal project progression will take priority in v1.3.1.
+
+- Switching between dark and light modes may leave some controls or panels missing until the affected view is rebuilt.
+- A new project may fail to accept its project name or complete a save.
+- The top-level **Next** action may not advance to the following workflow stage.
+- The analysis progress window may close too early while analysis continues in the background, leaving progress and cancellation state unavailable.
+
 ### 📦 Downloads and Installation
 
 - **Windows**: Extract `AutoPlaylistMaker_v1.3.0_windows_x64.zip`, run `setup.bat` if FFmpeg is missing, then launch `AutoPlaylistMaker_v1.3.0.exe`.
@@ -192,6 +210,15 @@ Version 1.3.0 is a major workflow update across music editing, distribution, cli
 - 終了後にプレビュー・レンダーの子プロセスが残る問題
 - ライトモードのボタン視認性、上部ナビゲーション、Stage 5 の灰色枠
 - 環境音が完成動画の繰り返し全体まで続かない問題
+
+### ⚠️ リリース後に確認された主な問題
+
+以下は v1.3.0 の公開後、一部の作業フローで報告された問題です。現在、正確な再現範囲を確認しており、通常のプロジェクト進行を妨げる項目から v1.3.1 で優先的に修正します。
+
+- ダークモードとライトモードを切り替えた後、一部の操作項目やパネルが表示されなくなる場合があります。
+- 新規プロジェクトでプロジェクト名を確定できない、または保存が完了しない場合があります。
+- 上部の「次へ」が反応せず、次の作業ステージへ進めない場合があります。
+- 音源解析中に進行状況ウィンドウが先に閉じ、解析だけがバックグラウンドで続くため、進行状況やキャンセル状態を確認できない場合があります。
 
 ### 📦 ダウンロードとインストール
 

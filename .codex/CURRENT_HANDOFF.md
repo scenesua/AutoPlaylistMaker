@@ -29,14 +29,16 @@
 ## 1.3.1 이월
 
 - 요구사항: PERF-001, PREVIEW-001, DESIGN-001, VIS-001, RENDER-001, UI-004, EFFECT-002, BUILD-001, I18N-002, CLIP-001
-- 문제: ISSUE-DATA-001, ISSUE-ARCH-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002, ISSUE-BUILD-003, ISSUE-CI-001, ISSUE-UI-003
+- 릴리스 후 최우선 문제: ISSUE-PROJECT-001, ISSUE-NAV-001, ISSUE-UI-004, ISSUE-ANALYSIS-001
+- 그 외 문제: ISSUE-DATA-001, ISSUE-ARCH-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002, ISSUE-BUILD-003, ISSUE-CI-001, ISSUE-UI-003
 
 ## 첫 작업
 
 1. baseline tests를 실행한다.
-2. `app.py` startup import와 `_LazyStage`를 profile해 PERF-001의 실제 병목을 수치화한다.
-3. `app.py` duration 표시와 `repeat_settings.estimate_group_duration()` 차이를 재현 test로 만든다.
-4. 측정 전 native splash나 대형 library를 임의로 제거하지 않는다.
+2. 새 프로젝트의 이름 지정→저장→`다음` 단계 이동을 한 흐름으로 재현하고 막히는 첫 지점을 찾는다.
+3. 각 Stage에서 다크↔라이트 전환 전후 widget과 page state를 비교한다.
+4. 분석 진행 창이 background worker보다 먼저 닫히는 callback 순서를 계측한다.
+5. 네 회귀를 복구하고 테스트로 고정한 뒤 PERF-001을 profile한다.
 
 ## 먼저 읽을 경로
 

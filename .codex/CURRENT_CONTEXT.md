@@ -18,11 +18,11 @@
 
 ## 1.3.1 우선순위
 
-1. PERF-001 cold-start profile과 최적화
-2. ISSUE-DATA-001 duration 경로 재현과 수정
-3. preview/output·visualizer 네 해상도 회귀 검사
-4. macOS `.app`과 실제 GPU encoder 검사
-5. 효과 category submenu gap과 CI/build 경고 정리
+1. ISSUE-PROJECT-001·ISSUE-NAV-001 프로젝트 이름/저장/다음 단계 차단 복구
+2. ISSUE-UI-004 양방향 테마 전환 뒤 사라지는 요소 복구
+3. ISSUE-ANALYSIS-001 분석 진행 창과 background 작업 수명주기 복구
+4. 위 회귀 테스트 고정 후 PERF-001 cold-start profile과 최적화
+5. duration·네 해상도·macOS/GPU 검증과 효과/CI 경고 정리
 
 ## 주의
 

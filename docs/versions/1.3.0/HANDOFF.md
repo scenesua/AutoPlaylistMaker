@@ -51,11 +51,12 @@
 
 ## 다음 버전으로 이월할 요구사항 ID
 
-- 최우선: PERF-001
+- 최우선 회귀 복구: CORE-001, SAVE-001, AUDIO-001, UI-004
+- 최적화: PERF-001
 - 버그 조사: PREVIEW-001, DESIGN-001, VIS-001, RENDER-001
 - UI·효과: UI-004, EFFECT-002
 - 플랫폼·품질: BUILD-001, I18N-002, CLIP-001
-- 연결 issue: ISSUE-DATA-001, ISSUE-ARCH-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002, ISSUE-BUILD-003, ISSUE-CI-001, ISSUE-UI-003
+- 연결 issue: ISSUE-UI-004, ISSUE-PROJECT-001, ISSUE-NAV-001, ISSUE-ANALYSIS-001, ISSUE-DATA-001, ISSUE-ARCH-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002, ISSUE-BUILD-003, ISSUE-CI-001, ISSUE-UI-003
 
 ## 변경한 주요 파일
 
@@ -94,6 +95,10 @@
 
 ## 현재 알려진 버그와 재현 조건
 
+- ISSUE-UI-004: 다크→라이트 또는 라이트→다크로 테마를 전환한 뒤 일부 화면 요소가 사라지거나 다시 그려지지 않는다는 사용자 보고가 있다. 영향 Stage와 상태 조합은 아직 재현하지 못했다.
+- ISSUE-PROJECT-001: 새 프로젝트 흐름에서 프로젝트 이름을 확정할 수 없고 저장도 완료되지 않는다는 사용자 보고가 있다. 프로젝트 생성·dirty 상태·저장 경로를 함께 추적해야 한다.
+- ISSUE-NAV-001: 상단 `다음`을 눌러도 다음 Stage로 넘어가지 않는다는 사용자 보고가 있다. 프로젝트 유효성 검사와 버튼 상태, stage 전환 callback을 분리해 확인해야 한다.
+- ISSUE-ANALYSIS-001: 분석을 시작하면 진행 창이 먼저 닫히고 실제 분석은 백그라운드에서 계속된다는 사용자 보고가 있다. 완료·취소 신호보다 앞서 창이 종료되는지 확인해야 한다.
 - ISSUE-PERF-001: Windows cold start. 실행 후 native 2.53초, loading 53.09초, main 87.24초.
 - ISSUE-DATA-001: trim/crossfade 뒤 수동 제거·group drag를 수행하고 UI `total_duration`과 render estimate를 비교한다.
 - ISSUE-TEST-001: 같은 프로젝트를 720p/1080p/세로/정사각 preview와 output으로 캡처 비교한다.
@@ -143,20 +148,19 @@
 ## 현재 git 상태
 
 - 릴리스 tag `v1.3.0`은 `f5e7c1a`를 가리킨다.
-- 원격 `main`은 릴리스 노트 보강 `04c281f`까지이며, `codex/release-v1.3.0`은 버전 종료 문서 commit 1개 앞선 clean 상태로 확정한다.
+- 원격 `main`은 릴리스 노트 보강 `04c281f`까지이며, `codex/release-v1.3.0`은 버전 종료와 릴리스 후 이슈 기록 commit 2개 앞선 clean 상태로 확정한다.
 - 버전 종료 commit은 코드가 아니라 `AGENTS.md`, `CHANGELOG.md`, `docs/`, `.codex/` 문서만 변경하며 이번 요청에서는 원격에 push하지 않는다.
 - 원본 개발 폴더 `AutoPlaylistMaker_v1.3.0`의 `master`는 `de32dbf` 기반 큰 dirty tree이므로 reset하지 않는다.
 - 다음 작업은 릴리스 기준 worktree `D:\aldente yt\AutoPlaylistMaker_release_v1.3.0`에서 시작한다.
 
 ## 1.3.1에서 먼저 처리할 순서
 
-1. 시작 전 baseline 63 tests와 Windows cold-start profile을 다시 측정한다.
-2. ISSUE-PERF-001을 import/module 단계별로 profile하고 측정값이 큰 병목만 줄인다.
-3. ISSUE-DATA-001 duration 경로를 재현 test로 고정한 뒤 공통 계산 함수로 모은다.
-4. ISSUE-TEST-001 네 해상도 preview/output 비교와 visualizer 성능을 측정한다.
-5. ISSUE-BUILD-003 macOS smoke와 실제 GPU encoder를 가능한 장비에서 확인한다.
-6. ISSUE-UI-003 계층형 submenu가 실제 탐색성을 개선하는지 확인하고 최소 구현한다.
-7. CI action 경고와 선택적 backend 경고를 정리하되 사용하지 않는 dependency를 무작정 추가하지 않는다.
+1. baseline 63 tests를 실행한 뒤 ISSUE-PROJECT-001과 ISSUE-NAV-001을 새 프로젝트 기준으로 재현해 생성·이름·저장·단계 이동을 먼저 복구한다.
+2. ISSUE-UI-004를 각 Stage에서 양방향 테마 전환으로 재현하고, stage 재구성 전후의 widget/state 수명주기를 검사한다.
+3. ISSUE-ANALYSIS-001의 progress window 생성·완료·취소 callback을 계측해 실제 분석 작업과 창 수명주기를 다시 연결한다.
+4. 위 네 회귀를 end-to-end 테스트로 고정한 뒤 ISSUE-PERF-001 cold-start profile과 최적화를 진행한다.
+5. ISSUE-DATA-001 duration 경로, 네 해상도 preview/output, macOS·GPU 검증을 차례로 수행한다.
+6. ISSUE-UI-003과 CI·선택 backend 경고는 차단 회귀가 해결된 뒤 정리한다.
 
 ## 다음 채팅에서 먼저 읽어야 할 문서와 코드 경로
 
