@@ -260,11 +260,11 @@
 - 상세 설명: 실행 직후 아이콘 중심 스플래시, 회색 상태 텍스트와 progress bar, 앱 아이콘, v1.3.0 표시를 제공한다.
 - 최초 확인 출처: 현재 채팅의 스플래시·아이콘 반복 수정 요청
 - 최초 적용 버전 / 마지막 변경 버전: 1.2.0 / 1.3.0
-- 현재 상태: 부분 완료
+- 현재 상태: 완료
 - 관련 코드·문서: `app.py:SplashScreen`, `app_icon.png`, `app_icon.ico`, build scripts
 - 관련 결정: DEC-008
 - 완료 조건·테스트: 소스/패키지 즉시 표시, 투명 로고 외곽 품질, 상태·progress 유지, main 전환
-- 비고: 패키지 창은 실행됐지만 최종 아이콘 외곽을 캡처로 재검수한 기록은 없다.
+- 비고: 투명 아이콘과 로딩 화면을 실제 패키지에서 캡처했고 메인 창 표시 뒤 스플래시가 남지 않는 것을 확인했다.
 
 ## UI-003 후원 링크
 
@@ -297,7 +297,7 @@
 - 관련 코드·문서: `app.py:_LazyStage`, `SplashScreen`, 빌드 구성
 - 관련 결정: DEC-008
 - 완료 조건·테스트: cold/warm start를 같은 장비에서 측정하고 병목별 목표를 정한 뒤 달성
-- 비고: 2026-07-29 Windows one-dir cold smoke에서 main window까지 약 77초였다.
+- 비고: 2026-07-30 Windows one-dir 최종 cold smoke에서 native icon 2.53초, loading 53.09초, main window 87.24초였다. 즉시 피드백은 해결됐지만 core 시작 시간은 미해결이다.
 
 ## SHUTDOWN-001 종료 시 자원 정리
 
@@ -319,18 +319,18 @@
 - 관련 코드·문서: `build_windows_onedir.ps1`, `build_windows.ps1`, `build_mac.sh`, `.github/workflows/build.yml`
 - 관련 결정: DEC-001
 - 완료 조건·테스트: Windows와 macOS 각각 사용자 지정 버전명으로 빌드·실행·종료·ZIP 검증
-- 비고: Windows는 통과했지만 `build_mac.sh`는 아직 1.2.1과 오래된 hidden imports를 사용한다.
+- 비고: Windows는 실제 실행·종료를 통과했고 macOS는 1.3.0 구성으로 GitHub Actions 빌드·ZIP 생성을 통과했다. macOS `.app` 실제 실행·종료 수동 검증은 1.3.1로 이월한다.
 
 ## EFFECT-002 추가형 효과 카드와 선택 메뉴
 
 - 상세 설명: 새 프로젝트는 빈 효과 목록으로 시작하고 사용자가 카테고리·검색 메뉴에서 실제 구현된 효과만 추가해 카드와 섹션별로 편집·복원·삭제한다.
 - 최초 확인 출처: 현재 채팅의 효과 목록 구조 전면 개편 요청
 - 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.0
-- 현재 상태: 완료
+- 현재 상태: 부분 완료
 - 관련 코드·문서: `stage4_design_effects.py`, `app.py`, `ui_state.py`, `tests/test_ui_interactions.py`
 - 관련 결정: DEC-011
 - 완료 조건·테스트: 빈 초기 상태, 추가 후 즉시 preview·dirty 반영, 검색·스크롤·키보드·바깥 닫기, 구형 프로젝트 migration, 섹션 범위 reset
-- 비고: 현재 구현된 효과는 단일 인스턴스이며 카드 순서는 inspector 정리 순서다. renderer의 시각 합성 순서는 기존 고정 의미 순서를 유지한다.
+- 비고: 검색·카테고리 구분·키보드·스크롤·화면 경계 배치는 구현됐다. 카테고리 hover/click 하위 메뉴와 화면 경계에서 하위 메뉴 방향을 뒤집는 계층형 동작은 구현되지 않아 1.3.1로 이월한다. 현재 효과는 단일 인스턴스이며 카드 순서는 inspector 정리 순서이고 renderer 합성은 기존 고정 의미 순서를 유지한다.
 
 ## AUDIO-004 전역 오디오 버스·환경음·미터
 

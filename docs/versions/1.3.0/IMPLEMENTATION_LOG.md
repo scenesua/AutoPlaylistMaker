@@ -135,3 +135,27 @@
 - 검증: 63 tests, 11 locale 0/0, py_compile, Ruff F/B, pip check, C# compiler 통과.
 - 실측: native 2.53초, loading 53.09초, main 87.24초, 두 전환 공백 0.2초 미만, main 뒤 잔류 없음.
 - 남은 작업: core cold-start 자체의 import/profile 최적화는 ISSUE-PERF-001.
+
+## 2026-07-30 — 릴리스와 버전 종료
+
+- 목적: 실제 GitHub 상태를 기준으로 1.3.0을 안전하게 통합·빌드·게시하고 1.3.1 인수인계를 확정.
+- 요구사항: BUILD-001, DOC-001
+- 주요 파일: `.github/workflows/build.yml`, `build_mac.sh`, `release_notes.md`, `setup.bat`, `setup_mac.sh`, `docs/`, `.codex/`
+- 구현:
+  - 기존 `origin/main`에서 `codex/release-v1.3.0`을 분기해 검증된 1.3.0 source만 통합
+  - macOS script를 1.3.0 version, icon/splash, locales, Stage 4·5/i18n/FFmpeg 모듈과 동기화
+  - Windows/macOS artifact가 모두 성공한 뒤 publish하는 release gate 구성
+  - 1.0.0~1.2.1 tone을 따른 한국어·영어·일본어 상세 release note 작성
+  - tag `v1.3.0`, release assets 4종과 `Latest` 공개 확인
+- 중요 결정: DEC-014
+- 발생 문제:
+  - GitHub token이 `workflow_dispatch` API를 403으로 거부
+  - 문서에 ISSUE-TEST-001이 잘못 해결 표시되고 EFFECT-002 계층형 submenu 누락이 기록되지 않음
+- 해결:
+  - 지원 중인 `v*` tag push trigger로 동일 workflow 실행
+  - 코드와 문서를 재대조해 실제 부분 완료·미검증 항목을 1.3.1로 이월
+- 검증:
+  - Actions run `30471288589`: Windows, macOS, publish 성공
+  - release asset 네 개의 size/digest 일치
+  - Windows ZIP launcher/core/splash/de-DE/ru-RU, macOS ZIP `.app` executable/splash/de-DE/ru-RU 존재
+- 남은 작업: `docs/versions/1.3.0/KNOWN_ISSUES.md`의 1.3.1 이월 목록.

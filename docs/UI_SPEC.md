@@ -86,7 +86,10 @@
 ## 선택·키보드·마우스 — 현재 유지
 
 - 폰트: Down, Enter, Esc, 검색 자동 focus.
+- 효과 추가: 검색창과 항목에서 Up/Down, Enter, Esc를 사용하고 focus가 팝업 밖으로 나가면 닫는다.
 - 음원 편집: Ctrl+Z, Ctrl+Y, wheel scroll, Ctrl+wheel zoom, double-click 보조 trim 편집.
+- 공통 slider: Alt+클릭으로 해당 컨트롤에 정의된 기본값을 복원한다.
+- 환경음 목록: double-click으로 선택 레이어의 활성 상태를 전환한다.
 - DnD 중 텍스트 선택과 흔들림을 최소화하고 drag source를 구분한다.
 - 다중 선택 이동은 표시 순서를 유지한다.
 - 모든 modal/popup/drag는 화면 전환과 destroy에서 grab·listener·timer를 정리한다.
@@ -115,6 +118,7 @@
 - 네 해상도 미리보기/출력 시각 비교: ISSUE-TEST-001.
 - 모든 visualizer 스타일의 낮은/높은 음량 움직임.
 - 실제 GPU codec 선택·fallback UX.
+- 효과 카테고리를 hover/click으로 펼치는 계층형 하위 메뉴와 화면 경계 반대 방향 열기: EFFECT-002.
 
 ## 시작 화면과 브랜드 — 현재 유지
 

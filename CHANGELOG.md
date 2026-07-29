@@ -42,6 +42,8 @@
 
 - 첫 패키지 실행 시간이 길다: `ISSUE-PERF-001`
 - 네 해상도에 대한 미리보기/출력 캡처 비교가 완료되지 않았다: `ISSUE-TEST-001`
+- macOS `.app`의 실제 실행·종료와 GPU encoder 실기기 검증이 남아 있다.
+- 효과 선택 메뉴는 검색형 카테고리 목록이며 계층형 하위 메뉴는 1.3.1로 이월한다.
 
 ### Final UI/audio pass
 
@@ -57,3 +59,10 @@
 - 네이티브 아이콘→작업 문구·진행 바 로딩→메인 창을 각각 분리하고 두 전환 공백을 0.2초 미만으로 확인했다.
 - 독일어 `de-DE`와 러시아어 `ru-RU` 각 661개 문구를 추가하고 언어 팝업을 11개 항목에 맞게 확장했다.
 - 아이콘과 첫 스플래시는 배경 없는 RGBA 재생·목록 심볼로 교체하고 컬러키 대신 per-pixel alpha를 사용했다.
+
+### Release
+
+- 기준 태그: `v1.3.0` (`f5e7c1a`)
+- GitHub Actions run `30471288589`: Windows·macOS build와 publish 성공
+- 공개 자산: Windows ZIP, macOS ZIP, `setup.bat`, `setup_mac.sh`
+- 릴리스 노트 보강 커밋: `04c281f`

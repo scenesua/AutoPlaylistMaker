@@ -1,26 +1,34 @@
 # 1.3.0 관련 문제
 
-상세 내용과 해결 이력은 [`../../KNOWN_ISSUES.md`](../../KNOWN_ISSUES.md)를 기준으로 한다.
+상세 재현 조건과 해결 이력은 [`../../KNOWN_ISSUES.md`](../../KNOWN_ISSUES.md)를 기준으로 한다.
 
-| 문제 ID | 1.3.0 상태 | 영향 |
+| 문제 ID | 1.3.0 종료 상태 | 다음 조치 |
 |---|---|---|
-| ISSUE-BUILD-001 | 해결 | 1.3.0 버전·asset·locale·모듈 동기화, 릴리스 전 macOS CI 빌드 필수 |
-| ISSUE-PERF-001 | 체감 완화·분석 중 | 아이콘 2.53초, 로딩 53.09초, main 87.24초 |
-| ISSUE-ARCH-001 | 보류 | 반복 API 중복 |
-| ISSUE-DATA-001 | 확인 필요 | 그룹 길이 표시 경로 불일치 가능 |
-| ISSUE-TEST-001 | 미해결 | preview/output 시각 동일성 최종 승인 불가 |
-| ISSUE-I18N-001 | 확인 필요 | 번역 의미 품질 승인 불가 |
-| ISSUE-BUILD-002 | 보류 | 선택적 Numba TBB 경고 |
-| ISSUE-UI-001 | 해결 | transparent RGBA icon과 로딩 splash 캡처 확인 |
-| ISSUE-WORK-001 | 해결 | `v1.3.0` 릴리스 태그를 기준점으로 사용 |
+| ISSUE-BUILD-001 | 해결 | macOS script와 1.3.0 asset/module 동기화 완료 |
+| ISSUE-WORK-001 | 해결 | `v1.3.0`/`f5e7c1a`를 릴리스 기준으로 사용 |
+| ISSUE-AUDIO-001 | 해결 | `asplit` 뒤 main label 연결 회귀 테스트 유지 |
+| ISSUE-UI-001 | 해결 | RGBA icon과 layered native splash 유지 |
+| ISSUE-UI-002 | 해결 | Stage 5 light theme 회귀 테스트 유지 |
+| ISSUE-PERF-001 | 미해결 | 1.3.1 첫 작업으로 cold-start profile |
+| ISSUE-DATA-001 | 확인 필요 | trim/crossfade 기준 duration 경로 대조 |
+| ISSUE-ARCH-001 | 보류 | repeat 공개 API 사용처 확인 후 단일화 |
+| ISSUE-TEST-001 | 미해결 | 네 해상도 preview/output 캡처 비교 |
+| ISSUE-I18N-001 | 확인 필요 | 11개 언어 원어민·장문 UI 검수 |
+| ISSUE-BUILD-002 | 보류 | 선택적 TBB/OpenMP backend 경고 조사 |
+| ISSUE-BUILD-003 | 확인 필요 | 실제 macOS `.app` 실행·종료 smoke |
+| ISSUE-CI-001 | 보류 | Node 24 지원 action major로 갱신 |
+| ISSUE-UI-003 | 부분 구현 | 효과 category submenu·edge flip 구현 여부 결정 |
 
-## 2026-07-29 최종 상태
+## 1.3.1 이월 요약
 
-- 해결: ISSUE-AUDIO-001 (`asplit` 뒤 `music_bus_main` 미연결). 시간 제한이 아니라 filtergraph label 연결 오류였다.
-- 해결: ISSUE-UI-002 (Stage 5 밝은 모드 고정 회색 root/gutter).
-- 해결: ISSUE-UI-001 (배경 없는 RGBA brand asset과 layered native launcher).
-- 해결: ISSUE-BUILD-001 (Mac 빌드 구성 동기화와 양 플랫폼 성공 후 게시 gate).
-- 해결: ISSUE-WORK-001 (`v1.3.0` 태그와 GitHub 릴리스 기준점).
-- 유지: ISSUE-PERF-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002.
-- 범위 제한: 효과 카드 순서는 renderer z-order가 아니며, 환경음 event scheduler와 momentary/short-term LUFS는 구현하지 않았다.
-- 최신 검증: 63 tests, 11 locale 0/0, native→loading→main 전환 공백 0.2초 미만·잔류 splash 없음.
+- 최우선: ISSUE-PERF-001, ISSUE-DATA-001
+- 기능 회귀 검증: ISSUE-TEST-001, ISSUE-BUILD-003, 실제 GPU encoder
+- UI 마감: ISSUE-UI-003, 모든 DPI·장문 locale
+- 유지보수: ISSUE-ARCH-001, ISSUE-BUILD-002, ISSUE-CI-001
+- 번역 품질: ISSUE-I18N-001
+
+## 의도적 범위 제한
+
+- 효과 카드 순서는 inspector 정리 순서이며 renderer z-order가 아니다.
+- 환경음 event scheduler와 momentary/short-term LUFS는 구현하지 않았다.
+- 목표 시간 반복은 마지막 playlist를 자르지 않으므로 목표를 초과할 수 있다.

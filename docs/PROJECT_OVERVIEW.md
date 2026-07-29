@@ -28,7 +28,7 @@ Auto Playlist Maker는 여러 음원을 분석·분배·편집하고 이미지·
 - PyInstaller Windows one-dir/one-file 빌드
 - GitHub Actions 태그 기반 Windows/macOS 릴리스 작업
 
-Windows 11에서 1.3.0 폴더형 패키지를 직접 검증했다. macOS 스크립트는 현재 `ISSUE-BUILD-001` 때문에 1.3.0 배포 기준으로 사용할 수 없다.
+Windows 11에서 1.3.0 폴더형 패키지를 직접 검증했다. GitHub Actions에서 Windows와 macOS 패키지 빌드 및 공개 릴리스를 확인했지만, 실제 macOS 장비의 `.app` 실행 smoke는 `ISSUE-BUILD-003`으로 남아 있다.
 
 ## 전체 작업 흐름
 
@@ -43,7 +43,7 @@ Windows 11에서 1.3.0 폴더형 패키지를 직접 검증했다. macOS 스크�
 
 ## 현재 개발 단계
 
-사용자가 명시한 현재 작업 버전은 1.3.0이다. 주요 1.3.0 기능은 코드와 자동 테스트에 연결됐지만, 변경 대부분이 기준 커밋 `de32dbf` 위의 미커밋 작업 트리에 남아 있다. 배포 완료로 간주하지 않는다.
+1.3.0은 `v1.3.0` 태그로 정식 릴리스됐다. 다음 작업 버전은 사용자가 지정한 1.3.1이며, 1.3.0 동작과 project format v4 호환성을 유지하면서 버그 개선과 최적화를 진행한다.
 
 ## 반드시 유지할 특성
 

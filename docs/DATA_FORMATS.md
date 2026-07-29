@@ -132,7 +132,7 @@ projects/[project name]/
 - panel 접힘·scroll 위치는 현재 별도 저장하지 않는다.
 - `design.active_effects`와 Stage 4의 `active_effect_ids`는 추가된 효과 카드의 안정적 ID 목록이다. 이 필드가 없는 구형 프로젝트는 기존 효과 전체를 활성 상태로 마이그레이션한다.
 - `design.global_audio`는 음악 master gain, 정규화/target/True Peak, 환경음 master gain과 환경음 레이어 목록을 저장한다.
-- 환경음 레이어는 `filepath`, `enabled`, `volume`을 포함하며 프로젝트 안으로 백업된 상대 경로를 사용할 수 있다.
+- 환경음 레이어는 `filepath`, `enabled`, `volume_db`, `pan`, `width`를 포함하며 프로젝트 안으로 백업된 상대 경로를 사용할 수 있다.
 - page plain state는 capture 시 deep copy하여 환경음 레이어나 효과 목록의 이후 변경이 저장 스냅샷을 오염시키지 않는다.
 
 ## 분석 캐시
@@ -156,7 +156,7 @@ projects/[project name]/
 - 렌더 중 그룹별 시각 설정: 임시 작업 폴더 `_visual.json`.
 - 렌더 완료 checkpoint: `RenderJob`이 그룹별 출력 파일 존재로 판단한다.
 
-언어 환경 설정은 프로젝트 파일과 분리된 전역 사용자 설정이다. 지원 코드는 `ko-KR`, `en-US`, `ja-JP`, `zh-CN`, `zh-TW`, `es-ES`, `fr-FR`, `it-IT`, `ar-SA`, `de-DE`, `ru-RU`다.
+언어 환경 설정은 프로젝트 파일과 분리된 전역 사용자 설정이다. 지원 코드는 `ko-KR`, `en-US`, `ja-JP`, `zh-CN`, `zh-TW`, `es-ES`, `fr-FR`, `it-IT`, `ar`, `de-DE`, `ru-RU`다.
 
 ## 내보내기
 
@@ -164,7 +164,7 @@ projects/[project name]/
 - 최종 영상: MP4
 - track timestamp: TXT
 - Windows 배포: `dist/AutoPlaylistMaker_v[VERSION]/`와 `_windows_x64.zip`
-- macOS 배포: `.app`와 `_macos.zip`을 의도하지만 ISSUE-BUILD-001 해결 전에는 1.3.0 형식으로 검증되지 않았다.
+- macOS 배포: `AutoPlaylistMaker_v1.3.0.app`과 `AutoPlaylistMaker_v1.3.0_macos.zip`. GitHub Actions 빌드·ZIP 내부 검사는 통과했지만 실제 macOS 실행·종료는 ISSUE-BUILD-003으로 남아 있다.
 
 ## 마이그레이션·호환성
 

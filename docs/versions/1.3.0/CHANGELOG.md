@@ -62,7 +62,8 @@
 
 ## Known Issues
 
-- ISSUE-BUILD-001, ISSUE-PERF-001, ISSUE-ARCH-001, ISSUE-DATA-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002, ISSUE-WORK-001
+- 1.3.1 이월: ISSUE-PERF-001, ISSUE-ARCH-001, ISSUE-DATA-001, ISSUE-TEST-001, ISSUE-I18N-001, ISSUE-BUILD-002, ISSUE-BUILD-003, ISSUE-CI-001, ISSUE-UI-003
+- 해결: ISSUE-BUILD-001, ISSUE-WORK-001, ISSUE-AUDIO-001, ISSUE-UI-001, ISSUE-UI-002
 
 ## 2026-07-29 final UI/audio additions
 
@@ -81,3 +82,11 @@
 - Handed off from native icon to the Tk progress/status splash, then from loading splash to the actual main window.
 - Replaced legacy logo/icon assets with a flat RGBA mark without background, gradient, shadow, or halo.
 - Verified native 2.53s, loading 53.09s, main 87.24s, sub-0.2s handoffs, and no residual splash.
+
+## 2026-07-30 release
+
+- Synced `build_mac.sh` to 1.3.0 with splash, locales and all current hidden imports.
+- Changed GitHub Actions to publish only after both Windows and macOS package jobs succeed.
+- Published tag `v1.3.0` at `f5e7c1a`; release-note source was expanded on `main` at `04c281f`.
+- Published and verified four assets: Windows ZIP, macOS ZIP, `setup.bat`, `setup_mac.sh`.
+- Corrected final documentation: EFFECT-002 remains partial because hierarchical category submenus are not implemented; macOS build succeeds but runtime smoke remains unverified.

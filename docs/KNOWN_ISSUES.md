@@ -14,12 +14,12 @@
 - 원인: Windows 1.3.0 구조 변경 후 macOS 스크립트 동기화 누락.
 - 임시 우회: 필요 없음.
 - 수정된 버전: 1.3.0
-- 검증 결과: 버전, 아이콘·스플래시·locale, 1.3.0 모듈 포함을 동기화하고 셸 구문 검사를 통과했다. 릴리스 워크플로는 Windows와 macOS 빌드가 모두 성공한 경우에만 태그와 자산을 게시한다.
+- 검증 결과: 버전, 아이콘·스플래시·locale, 1.3.0 모듈 포함을 동기화했다. GitHub Actions run `30471288589`에서 macOS `.app`/ZIP 빌드와 양 플랫폼 성공 후 publish가 통과했다.
 
 ## ISSUE-PERF-001 패키지 첫 실행 지연
 
-- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0
-- 상태: 사용자 피드백 경로 완화, 코어 속도 분석 중
+- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0, 1.3.1
+- 상태: 미해결, 1.3.1 이월
 - 심각도: 높음
 - 재현 조건: Windows one-dir 빌드를 cold start하고 main window 표시까지 측정.
 - 기대 동작: 스플래시가 즉시 표시되고 합리적인 시간 안에 메인 창 전환.
@@ -32,8 +32,8 @@
 
 ## ISSUE-ARCH-001 반복 계산 공개 API 중복
 
-- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0
-- 상태: 보류
+- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0, 1.3.1
+- 상태: 보류, 1.3.1 이월
 - 심각도: 중간
 - 재현 조건: `repeat_settings.py`와 `timeline_utils.py`의 `RepeatPlan`, `build_repeat_plan`, duration 추정 함수 비교.
 - 기대 동작: 반복 계획의 기준 구현이 하나여야 한다.
@@ -46,8 +46,8 @@
 
 ## ISSUE-DATA-001 그룹 총 길이 계산 경로 불일치 가능성
 
-- 발견 버전 / 영향 버전: 1.3.0 코드 정리 / 1.3.0
-- 상태: 확인 필요
+- 발견 버전 / 영향 버전: 1.3.0 코드 정리 / 1.3.0, 1.3.1
+- 상태: 확인 필요, 1.3.1 우선 조사
 - 심각도: 중간
 - 재현 조건: 수동 제거·그룹 drag·trim 변경 후 `total_duration`과 렌더 추정 길이를 비교.
 - 기대 동작: 모든 UI·저장·렌더 경로가 trim과 crossfade를 반영한 같은 기준을 사용.
@@ -60,8 +60,8 @@
 
 ## ISSUE-TEST-001 미리보기/출력 네 해상도 캡처 비교 미완료
 
-- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0
-- 상태: 해결
+- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0, 1.3.1
+- 상태: 미해결, 1.3.1 이월
 - 심각도: 중간
 - 재현 조건: 같은 프로젝트를 네 지원 해상도로 preview/output 캡처 비교.
 - 기대 동작: 텍스트·이미지·비주얼라이저의 좌표와 상대 크기 일치.
@@ -74,8 +74,8 @@
 
 ## ISSUE-I18N-001 번역 의미 품질의 사람 검수 미완료
 
-- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0
-- 상태: 확인 필요
+- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0, 1.3.1
+- 상태: 확인 필요, 1.3.1 이월
 - 심각도: 중간
 - 재현 조건: 각 언어 원어민이 모든 단계 문구를 맥락과 함께 검수.
 - 기대 동작: 자연스럽고 일관된 전문 UI 문구.
@@ -86,19 +86,61 @@
 - 수정된 버전: 없음
 - 검증 결과: 11개 언어 구조 검사 0 errors, 0 warnings.
 
-## ISSUE-BUILD-002 선택적 `tbb12.dll` PyInstaller 경고
+## ISSUE-BUILD-002 선택적 Numba 병렬 backend PyInstaller 경고
 
-- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0
-- 상태: 보류
+- 발견 버전 / 영향 버전: 1.3.0 / 1.3.0, 1.3.1
+- 상태: 보류, 1.3.1 이월
 - 심각도: 낮음
-- 재현 조건: Windows PyInstaller 빌드.
+- 재현 조건: Windows 또는 macOS PyInstaller 빌드.
 - 기대 동작: 의존 DLL 경고 없음.
-- 실제 동작: Numba 선택적 TBB pool의 `tbb12.dll`을 찾지 못한다.
-- 관련 코드: 빌드 환경의 Numba, `build_windows_onedir.ps1`
-- 원인: 사용하지 않는 선택적 TBB backend가 분석 대상에 포함됨.
+- 실제 동작: Windows에서는 Numba 선택적 TBB pool의 `tbb12.dll`, macOS에서는 선택적 OpenMP pool의 `libomp.dylib`을 찾지 못한다.
+- 관련 코드: 빌드 환경의 Numba, `build_windows_onedir.ps1`, `build_mac.sh`
+- 원인: 사용하지 않는 선택적 병렬 backend가 PyInstaller 분석 대상에 포함됨.
 - 임시 우회: 현재 기본 분석·렌더 경로는 해당 backend를 사용하지 않는다.
 - 수정된 버전: 없음
-- 검증 결과: 전체 테스트와 패키지 실행 성공.
+- 검증 결과: 전체 테스트, Windows 패키지 실행, Windows·macOS CI 빌드 성공. 해당 backend를 실제로 호출하는 경로는 확인되지 않았다.
+
+## ISSUE-BUILD-003 macOS 릴리스 패키지 실행 미검증
+
+- 발견 버전 / 영향 버전: 1.3.0 종료 / 1.3.0, 1.3.1
+- 상태: 확인 필요, 1.3.1 이월
+- 심각도: 중간
+- 재현 조건: GitHub 릴리스의 `AutoPlaylistMaker_v1.3.0_macos.zip`을 실제 macOS 장치에서 풀고 `.app`을 실행해 첫 화면, 메인 창, FFmpeg 탐색과 종료를 확인한다.
+- 기대 동작: `.app`이 열리고 11개 locale·스플래시·미리보기·종료 경로가 동작한다.
+- 실제 동작: GitHub Actions에서 `.app`/ZIP 생성과 내부 executable/resource 존재만 확인했으며 GUI 실행은 수행하지 않았다.
+- 관련 코드: `build_mac.sh`, `.github/workflows/build.yml`, `app.py`, `ffmpeg_service.py`
+- 원인: 현재 작업 환경이 Windows이고 Actions build job에 GUI smoke가 없다.
+- 임시 우회: macOS 사용자는 Finder 우클릭 `열기`로 unsigned app을 실행하고 FFmpeg가 없으면 `bash setup_mac.sh`를 사용한다.
+- 수정된 버전: 없음
+- 검증 결과: CI bundle 273MB/756 files, release ZIP 105,059,064 bytes, SHA-256 `EE181CD4B6E89B7A68958B91E9278714D78370E6859ABF063849131BA0B32712`; 실행은 미검증.
+
+## ISSUE-CI-001 GitHub Actions Node 20 사용 action 경고
+
+- 발견 버전 / 영향 버전: 1.3.0 릴리스 / 1.3.1
+- 상태: 보류, 1.3.1 이월
+- 심각도: 낮음
+- 재현 조건: GitHub Actions build run의 job summary를 확인한다.
+- 기대 동작: 지원 중인 Node runtime을 사용하는 action으로 경고 없이 실행한다.
+- 실제 동작: `actions/checkout@v4`, `setup-python@v5`, `upload-artifact@v4`, `download-artifact@v4`가 Node 20 deprecation 경고와 함께 Node 24 강제 실행됐다.
+- 관련 코드: `.github/workflows/build.yml`
+- 원인: workflow action major version이 현재 runner 권장 runtime보다 오래됐다.
+- 임시 우회: 현재 runner가 Node 24로 강제 실행해 build와 publish는 성공한다.
+- 수정된 버전: 없음
+- 검증 결과: run `30471288589` 성공. 경고만 존재한다.
+
+## ISSUE-UI-003 효과 선택 메뉴의 계층형 하위 메뉴 미구현
+
+- 발견 버전 / 영향 버전: 1.3.0 종료 감사 / 1.3.0, 1.3.1
+- 상태: 부분 구현, 1.3.1 이월
+- 심각도: 중간
+- 재현 조건: Stage 4에서 `+ 효과 추가`를 누르고 카테고리에 hover 또는 click한다.
+- 기대 동작: 카테고리별 하위 효과 메뉴가 열리고 화면 경계에서는 반대 방향으로 배치된다.
+- 실제 동작: 검색과 category heading이 있는 단일 스크롤 팝업에 효과가 모두 인라인으로 표시된다. Up/Down·Enter·Esc·바깥 닫기와 화면 안 배치는 동작한다.
+- 관련 코드: `stage4_design_effects.py:_open_effect_picker`, `docs/UI_SPEC.md`
+- 원인: 계층형 submenu 대신 더 단순한 grouped popup으로 구현을 마감했다.
+- 임시 우회: 검색 또는 세로 스크롤로 효과를 선택한다.
+- 수정된 버전: 없음
+- 검증 결과: EFFECT-002를 부분 완료로 정정했다.
 
 ## ISSUE-UI-001 최종 스플래시 로고 외곽
 
@@ -114,10 +156,10 @@
 - 수정된 버전: 1.3.0
 - 검증 결과: PNG 모서리 alpha 0, layered-window API 성공, 별도 로딩 스플래시 실캡처 확인.
 
-## ISSUE-WORK-001 1.3.0 주요 변경이 미커밋 작업 트리에 존재
+## ISSUE-WORK-001 1.3.0 릴리스 이전 주요 변경의 미커밋 상태
 
 - 발견 버전 / 영향 버전: 1.3.0 / 1.3.0
-- 상태: 미해결
+- 상태: 해결
 - 심각도: 높음
 - 재현 조건: `git status --short`.
 - 기대 동작: 검증된 버전 기준점을 식별할 수 있는 commit 또는 tag 존재.

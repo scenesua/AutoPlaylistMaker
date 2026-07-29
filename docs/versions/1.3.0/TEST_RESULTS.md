@@ -159,3 +159,53 @@ SPLASH_AFTER_MAIN=False
 ```
 
 첫 화면 asset은 `test_artifacts/branding/native_icon_splash_transparent.png`, 로딩 화면 실캡처는 `test_artifacts/branding/loading_splash_first_frame.png`다. 로딩 캡처에서 `GUI 구성 중...`과 90% 진행 바를 확인했다. 네이티브→로딩 0.195초, 로딩→main 0.193초다.
+
+## 2026-07-30 버전 종료 재검증
+
+### 자동 검사
+
+```text
+python -m unittest discover -s tests -v
+결과: 63 passed, 57.256s
+
+python check_locales.py
+결과: 0 errors, 0 warnings
+
+python -m ruff check . --exclude build --exclude dist --exclude .git --select F,B
+결과: All checks passed
+
+루트 및 tests Python 파일 py_compile
+결과: 통과
+
+python -m pip check
+결과: No broken requirements found
+
+bash -n build_mac.sh
+bash -n setup_mac.sh
+결과: 두 스크립트 모두 통과
+
+.github/workflows/release.yml YAML 파싱
+결과: 통과
+```
+
+별도의 `mypy` 또는 `pyright` 설정은 저장소에 없으므로 타입 검사는 실행하지 않았으며 통과로 기록하지 않는다.
+
+### 릴리스 증거
+
+- GitHub Actions run `30471288589`: `build-windows`, `build-macos`, `publish` 모두 `success`
+- 공개 릴리스: `v1.3.0`, draft 아님, prerelease 아님
+- 릴리스 대상 commit: `f5e7c1a`
+- Windows ZIP: `149,289,942` bytes, SHA-256 `234AF2B1A286E855A0F95443CDA3324969CCC94CF69DB55D1B09B13F38B86063`
+- macOS ZIP: `105,059,064` bytes, SHA-256 `EE181CD4B6E89B7A68958B91E9278714D78370E6859ABF063849131BA0B32712`
+- `setup.bat`: SHA-256 `236F979C0B4232C88B739EB1E2BCCCF324049A2C053C9E247621B0FA895C021E`
+- `setup_mac.sh`: SHA-256 `0D69D0C4376D471D95017335159E7BB1DA9CFACD3666A9C24CA789C447BB7ADD`
+
+버전 종료 시점에는 릴리스 commit에서 이미 성공한 양 플랫폼 빌드를 다시 만들지 않았다. 이후 변경은 문서뿐이므로 위 Actions 결과를 실제 배포 바이너리의 빌드 근거로 사용한다.
+
+### 종료 시점에 실행하지 못한 검사
+
+- 실제 macOS 장비에서 `.app` 실행, 첫 화면, 종료 및 렌더 smoke
+- NVIDIA/Intel/AMD 각 GPU의 실제 하드웨어 인코더
+- 11개 언어의 원어민 문구 검수
+- 최소·기본·최대·전체 화면 4해상도 최종 캡처 비교
+- 수 시간짜리 실제 프로젝트의 전체 재생과 장시간 렌더
