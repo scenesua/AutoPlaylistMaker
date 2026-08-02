@@ -27,6 +27,9 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt 2>$null
           pip install pyinstaller
+      - name: Install ffmpeg/ffprobe
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
       - name: Build
         run: .\build_windows_onedir.ps1
         shell: pwsh
