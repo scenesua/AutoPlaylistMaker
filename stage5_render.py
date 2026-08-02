@@ -7,6 +7,7 @@ import sys
 import json
 import copy
 import logging
+import subprocess
 from repeat_settings import MODE_COUNT, MODE_TARGET, build_repeat_plan, hms_to_seconds, estimate_group_duration, format_duration
 from i18n import t, choice_id
 from ffmpeg_service import ensure_ffmpeg_available
@@ -21,6 +22,13 @@ RESOLUTION_CHOICES = {
     "portrait": "design.resolutionPortrait",
     "square": "design.resolutionSquare",
     "custom": "render.resCustom",
+}
+RESOLUTION_PRESETS = {
+    "720p": (1280, 720),
+    "1080p": (1920, 1080),
+    "4k": (3840, 2160),
+    "portrait": (1080, 1920),
+    "square": (1080, 1080),
 }
 VIDEO_CODEC_CHOICES = {
     "auto": "render.autoCodec",
@@ -89,6 +97,8 @@ class Stage5Render(tk.Frame):
         self.resolution = tk.StringVar(value="1080p")
         self.custom_width_var = tk.StringVar(value="1920")
         self.custom_height_var = tk.StringVar(value="1080")
+        self._last_valid_resolution = (1920, 1080)
+        self._resolution_syncing = False
         self.fps_var = tk.StringVar(value="24")
         self.video_codec_var = tk.StringVar(value="auto")
         self.audio_codec_var = tk.StringVar(value="aac")
@@ -96,6 +106,12 @@ class Stage5Render(tk.Frame):
         self.audio_bitrate_var = tk.StringVar(value="320k")
         self.normalize_loudness_var = tk.BooleanVar(value=False)
         self.target_lufs_var = tk.StringVar(value="-14")
+        self.loop_video_var = tk.BooleanVar(value=False)
+        self.loop_mode_var = tk.StringVar(value=MODE_COUNT)
+        self.loop_count_var = tk.StringVar(value="1")
+        self.loop_target_h_var = tk.StringVar(value="1")
+        self.loop_target_m_var = tk.StringVar(value="0")
+        self.loop_target_s_var = tk.StringVar(value="0")
         self._render_cancel_event = threading.Event()
         self._render_job = None
         self._last_render_dir = None
@@ -131,9 +147,18 @@ class Stage5Render(tk.Frame):
         custom_res_row = tk.Frame(sf, bg=T['bg_card'])
         custom_res_row.pack(fill=tk.X, padx=12, pady=2)
         a.styled_label(custom_res_row, t("render.customRes"), size=10, bg=T['bg_card']).pack(side=tk.LEFT)
-        a.styled_entry(custom_res_row, textvariable=self.custom_width_var, width=6).pack(side=tk.LEFT, padx=(6, 2))
+        self.custom_width_entry = a.styled_entry(
+            custom_res_row, textvariable=self.custom_width_var, width=6
+        )
+        self.custom_width_entry.pack(side=tk.LEFT, padx=(6, 2))
         a.styled_label(custom_res_row, t("render.resMulti"), size=10, bg=T['bg_card']).pack(side=tk.LEFT)
-        a.styled_entry(custom_res_row, textvariable=self.custom_height_var, width=6).pack(side=tk.LEFT, padx=2)
+        self.custom_height_entry = a.styled_entry(
+            custom_res_row, textvariable=self.custom_height_var, width=6
+        )
+        self.custom_height_entry.pack(side=tk.LEFT, padx=2)
+        for entry in (self.custom_width_entry, self.custom_height_entry):
+            entry.bind("<Return>", self._commit_custom_resolution, add="+")
+            entry.bind("<FocusOut>", self._commit_custom_resolution, add="+")
         opt(t("render.fps"), self.fps_var, ["8", "12", "24", "30"])
         codec_row = tk.Frame(sf, bg=T['bg_card'])
         codec_row.pack(fill=tk.X, padx=12, pady=2)
@@ -172,19 +197,60 @@ class Stage5Render(tk.Frame):
                 menu.add_command(label=o, command=lambda v=o: self.video_bitrate_var.set(v))
         _update_video_bitrate_options()
         self.resolution.trace_add("write", _update_video_bitrate_options)
+        self.resolution.trace_add("write", self._sync_preset_dimensions)
 
         sep()
-        sec(t("render.loopVideo"))
+        sec(t("render.repeatSection"))
+        chk(t("render.loopEnable"), self.loop_video_var)
+        repeat_mode_row = tk.Frame(sf, bg=T['bg_card'])
+        repeat_mode_row.pack(fill=tk.X, padx=12, pady=2)
+        a.styled_label(
+            repeat_mode_row, t("render.loopMode"), size=10, bg=T['bg_card']
+        ).pack(side=tk.LEFT)
+        a.styled_choice_menu(
+            repeat_mode_row, self.loop_mode_var, LOOP_MODE_CHOICES
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        count_row = tk.Frame(sf, bg=T['bg_card'])
+        count_row.pack(fill=tk.X, padx=12, pady=2)
+        a.styled_label(
+            count_row, t("render.loopCountLabel"), size=10, bg=T['bg_card']
+        ).pack(side=tk.LEFT)
+        self.loop_count_entry = a.styled_entry(
+            count_row, textvariable=self.loop_count_var, width=7
+        )
+        self.loop_count_entry.pack(side=tk.LEFT, padx=6)
+        target_row = tk.Frame(sf, bg=T['bg_card'])
+        target_row.pack(fill=tk.X, padx=12, pady=2)
+        a.styled_label(
+            target_row, t("render.loopTargetLabel"), size=10, bg=T['bg_card']
+        ).pack(side=tk.LEFT)
+        self.loop_target_entries = []
+        for variable, unit in (
+            (self.loop_target_h_var, t("render.loopTargetHours")),
+            (self.loop_target_m_var, t("render.loopTargetMinutes")),
+            (self.loop_target_s_var, t("render.loopTargetSec")),
+        ):
+            entry = a.styled_entry(target_row, textvariable=variable, width=4)
+            entry.pack(side=tk.LEFT, padx=(5, 2))
+            self.loop_target_entries.append(entry)
+            a.styled_label(
+                target_row, unit, size=9, bg=T['bg_card']
+            ).pack(side=tk.LEFT)
         self.loop_summary_label = a.styled_label(sf, "", size=9, color=T['fg_dim'], bg=T['bg_card'])
         self.loop_summary_label.pack(fill=tk.X, anchor=tk.W, padx=12, pady=(4, 2))
         a.styled_label(
-            sf, t("render.loopReadOnlyInfo"), size=8,
+            sf, t("render.loopInfo"), size=8,
             color=T['fg_dimmer'], bg=T['bg_card']
         ).pack(anchor=tk.W, padx=12, pady=(0, 4))
-        a.styled_button(
-            sf, t("render.editInEffects"), lambda: self.app.show_stage(4),
-            padx=8,
-        ).pack(anchor=tk.W, padx=12, pady=(0, 4))
+        for entry in [self.loop_count_entry, *self.loop_target_entries]:
+            entry.bind("<Return>", self._commit_repeat_fields, add="+")
+            entry.bind("<FocusOut>", self._commit_repeat_fields, add="+")
+        for variable in (
+            self.loop_video_var, self.loop_mode_var, self.loop_count_var,
+            self.loop_target_h_var, self.loop_target_m_var,
+            self.loop_target_s_var,
+        ):
+            variable.trace_add("write", lambda *_: self._update_repeat_summary())
 
         sep()
         sec(t("globalAudio.title"))
@@ -235,35 +301,43 @@ class Stage5Render(tk.Frame):
                                                     color=T['fg_dim'], bg=T['bg_card'])
         self.render_progress_label.pack(anchor=tk.W)
 
-    def _repeat_stage(self):
-        return self.app._ensure_stage(4)
-
-    @property
-    def loop_video_var(self):
-        return self._repeat_stage().loop_video_var
-
-    @property
-    def loop_mode_var(self):
-        return self._repeat_stage().loop_mode_var
-
-    @property
-    def loop_count_var(self):
-        return self._repeat_stage().loop_count_var
-
-    @property
-    def loop_target_h_var(self):
-        return self._repeat_stage().loop_target_h_var
-
-    @property
-    def loop_target_m_var(self):
-        return self._repeat_stage().loop_target_m_var
-
-    @property
-    def loop_target_s_var(self):
-        return self._repeat_stage().loop_target_s_var
-
     def _get_repeat_plan(self, base_duration=None):
-        return self._repeat_stage().get_repeat_plan(base_duration)
+        if base_duration is None:
+            if self.app.video_groups:
+                index = min(self.selected_group, len(self.app.video_groups) - 1)
+                base_duration = estimate_group_duration(
+                    self.app.video_groups[index]
+                )
+            else:
+                base_duration = 0
+        return build_repeat_plan(
+            base_duration,
+            enabled=self.loop_video_var.get(),
+            mode=choice_id(
+                self.loop_mode_var.get(), LOOP_MODE_CHOICES, MODE_COUNT
+            ),
+            repeat_count=max(1, int(self.loop_count_var.get() or "1")),
+            target_seconds=hms_to_seconds(
+                self.loop_target_h_var.get() or "0",
+                self.loop_target_m_var.get() or "0",
+                self.loop_target_s_var.get() or "0",
+            ),
+        )
+
+    def _commit_repeat_fields(self, _event=None):
+        try:
+            count = max(1, int(self.loop_count_var.get() or "1"))
+            hours = max(0, int(self.loop_target_h_var.get() or "0"))
+            minutes = max(0, min(59, int(self.loop_target_m_var.get() or "0")))
+            seconds = max(0, min(59, int(self.loop_target_s_var.get() or "0")))
+        except ValueError:
+            count, hours, minutes, seconds = 1, 1, 0, 0
+        self.loop_count_var.set(str(count))
+        self.loop_target_h_var.set(str(hours))
+        self.loop_target_m_var.set(str(minutes))
+        self.loop_target_s_var.set(str(seconds))
+        self._update_repeat_summary()
+        self.app.set_dirty(True)
 
     def _update_repeat_summary(self):
         if not hasattr(self, "loop_summary_label"):
@@ -271,6 +345,11 @@ class Stage5Render(tk.Frame):
         target_mode = choice_id(
             self.loop_mode_var.get(), LOOP_MODE_CHOICES, MODE_COUNT
         ) == MODE_TARGET
+        self.loop_count_entry.configure(
+            state=tk.DISABLED if target_mode else tk.NORMAL
+        )
+        for entry in self.loop_target_entries:
+            entry.configure(state=tk.NORMAL if target_mode else tk.DISABLED)
         try:
             plan = self._get_repeat_plan()
             if not self.loop_video_var.get():
@@ -311,10 +390,6 @@ class Stage5Render(tk.Frame):
         if hasattr(self, "audio_summary_label"):
             config = self._collect_render_config()
             audio = config.get("global_audio", {})
-            ambient_count = sum(
-                1 for item in audio.get("ambient_tracks", [])
-                if item.get("enabled", True)
-            )
             self.audio_summary_label.configure(text=(
                 f"{t('globalAudio.musicMaster')}: "
                 f"{audio.get('music_master_db', 0):.1f} dB\n"
@@ -323,8 +398,7 @@ class Stage5Render(tk.Frame):
                 f"{t('globalAudio.targetLufs')}: "
                 f"{audio.get('target_lufs', -14):.1f}\n"
                 f"{t('globalAudio.truePeak')}: "
-                f"{audio.get('true_peak_dbtp', -1):.1f} dBTP  ·  "
-                f"{t('globalAudio.ambientTracks')}: {ambient_count}"
+                f"{audio.get('true_peak_dbtp', -1):.1f} dBTP"
             ))
 
     def _set_group(self, idx):
@@ -338,23 +412,74 @@ class Stage5Render(tk.Frame):
         pass
 
     def _selected_resolution(self):
-        resolution_map = {
-            "720p": (1280, 720), "1080p": (1920, 1080),
-            "4k": (3840, 2160), "portrait": (1080, 1920),
-            "square": (1080, 1080),
-        }
         resolution_id = choice_id(
             self.resolution.get(), RESOLUTION_CHOICES, "1080p"
         )
         if resolution_id != "custom":
-            return resolution_map.get(resolution_id, (1920, 1080))
+            return RESOLUTION_PRESETS.get(resolution_id, (1920, 1080))
         width = int(self.custom_width_var.get())
         height = int(self.custom_height_var.get())
         if not (64 <= width <= 7680 and 64 <= height <= 7680):
             raise ValueError(t("render.resolutionRange"))
         return width - width % 2, height - height % 2
 
-    def _start_render(self, out_dir_override=None, skip_completed=False):
+    def _sync_preset_dimensions(self, *_args):
+        if self._resolution_syncing:
+            return
+        preset_id = choice_id(
+            self.resolution.get(), RESOLUTION_CHOICES, "1080p"
+        )
+        dimensions = RESOLUTION_PRESETS.get(preset_id)
+        if not dimensions:
+            return
+        self._resolution_syncing = True
+        try:
+            self.custom_width_var.set(str(dimensions[0]))
+            self.custom_height_var.set(str(dimensions[1]))
+            self._last_valid_resolution = dimensions
+        finally:
+            self._resolution_syncing = False
+        self.app.set_dirty(True)
+
+    def _commit_custom_resolution(self, _event=None):
+        if self._resolution_syncing:
+            return
+        try:
+            width = int(self.custom_width_var.get())
+            height = int(self.custom_height_var.get())
+        except ValueError:
+            width, height = self._last_valid_resolution
+            self.custom_width_var.set(str(width))
+            self.custom_height_var.set(str(height))
+            return
+        width = max(64, min(7680, width))
+        height = max(64, min(7680, height))
+        width -= width % 2
+        height -= height % 2
+        preset_id = next(
+            (key for key, value in RESOLUTION_PRESETS.items()
+             if value == (width, height)),
+            "custom",
+        )
+        self._resolution_syncing = True
+        try:
+            self.custom_width_var.set(str(width))
+            self.custom_height_var.set(str(height))
+            self.resolution.set(preset_id)
+            self._last_valid_resolution = (width, height)
+        finally:
+            self._resolution_syncing = False
+        self.app.set_dirty(True)
+
+    def _set_app_navigation_locked(self, locked):
+        state = tk.DISABLED if locked else tk.NORMAL
+        self._a.set_button_state(self.app.prev_btn, state)
+        self._a.set_button_state(self.app.theme_btn, state)
+        stage0 = self.app.stages[0]
+        if hasattr(stage0, "lang_btn"):
+            self._a.set_button_state(stage0.lang_btn, state)
+
+    def _start_render(self, out_dir_override=None):
         if not self.app.video_groups:
             messagebox.showwarning(t("common.warning"), t("render.noGroup"))
             return
@@ -364,6 +489,7 @@ class Stage5Render(tk.Frame):
         self._last_render_dir = out_dir
         from render_jobs import RenderJob
         self._render_job = RenderJob(out_dir)
+        self._render_job.set_state("VALIDATING_SETTINGS")
         self._render_cancel_event = self._render_job.cancel_event
 
         self._a.set_button_state(
@@ -396,18 +522,21 @@ class Stage5Render(tk.Frame):
             self._a.set_button_state(
                 self.render_btn, tk.NORMAL, text=t("render.startAll")
             )
+            self._a.set_button_state(self.cancel_render_btn, tk.DISABLED)
             return
         if loop_enabled and repeat_mode == MODE_COUNT and repeat_count < 1:
             messagebox.showwarning(t("render.inputError"), t("render.loopCountMin"))
             self._a.set_button_state(
                 self.render_btn, tk.NORMAL, text=t("render.startAll")
             )
+            self._a.set_button_state(self.cancel_render_btn, tk.DISABLED)
             return
         if loop_enabled and repeat_mode == MODE_TARGET and repeat_target_seconds <= 0:
             messagebox.showwarning(t("render.inputError"), t("render.loopTargetMin"))
             self._a.set_button_state(
                 self.render_btn, tk.NORMAL, text=t("render.startAll")
             )
+            self._a.set_button_state(self.cancel_render_btn, tk.DISABLED)
             return
         render_fps = int(self.fps_var.get())
         render_video_codec = choice_id(
@@ -436,8 +565,23 @@ class Stage5Render(tk.Frame):
             group_render_configs.append(config)
         project_state_snapshot = self.app.collect_project_state()
         all_analysis_map = {track.filepath: track.analysis for track in self.app.tracks if track.analysis}
+        stage0 = self.app.stages[0]
+        project_target_duration = (
+            stage0.get_target_seconds()
+            if hasattr(stage0, "get_target_seconds") else 0
+        )
+        project_tolerance = (
+            stage0.get_tolerance()
+            if hasattr(stage0, "get_tolerance") else 0
+        )
         def _rlog(msg):
             logger.info(msg)
+            self._render_job.log(msg)
+
+        def _encoder_started(pid):
+            self._render_job.process_pid = pid
+            self._render_job.set_state("RUNNING")
+            logger.info("Render encoder pid=%s", pid)
 
         def run():
             _rlog(f"=== render start: {len(render_groups)} groups ===")
@@ -446,52 +590,78 @@ class Stage5Render(tk.Frame):
                 loop_video_repetitions,
             )
             try:
+                from ffmpeg_service import ensure_ffprobe_available
+                from render_jobs import validate_media_output
+                self._render_job.set_state("PREPARING")
                 total_groups = len(render_groups)
-                self.after(0, lambda tt=total_groups: self._render_set_progress(0, tt, 0))
+                self.app.post_ui(
+                    lambda tt=total_groups:
+                    self._render_set_progress(0, tt, 0)
+                )
                 render_errors = 0
-                render_skipped = 0
+                successful_outputs = 0
+                last_render_error = None
                 for gi, g in enumerate(render_groups):
                     if self._render_cancel_event.is_set():
                         raise RuntimeError(t("render.cancelled"))
                     tracks = g.get('tracks', [])
                     if not tracks:
-                        render_skipped += 1
+                        render_errors += 1
+                        self.app.post_ui(
+                            lambda ii=gi: self._update_queue(
+                                ii, t("render.noAnalyzedTracks")
+                            )
+                        )
                         continue
-                    if skip_completed and self._render_job.is_completed(gi):
-                        self.after(0, lambda ii=gi: self._update_queue(ii, t("render.keepCompleted")))
-                        continue
-                    self.after(0, lambda ii=gi: self._update_queue(ii, t("render.mixingAudio")))
+                    self.app.post_ui(
+                        lambda ii=gi:
+                        self._update_queue(ii, t("render.mixingAudio"))
+                    )
                     valid_tracks = [tr for tr in tracks if tr.get('analysis') and tr.get('filepath')]
                     analyses = [tr['analysis'] for tr in valid_tracks]
                     if not analyses:
-                        render_skipped += 1
+                        render_errors += 1
+                        self.app.post_ui(
+                            lambda ii=gi: self._update_queue(
+                                ii, t("render.noAnalyzedTracks")
+                            )
+                        )
                         continue
                     try:
+                        self._render_job.set_state("BUILDING_TIMELINE")
                         g_dir = os.path.join(out_dir, f"mix_{gi+1}")
                         os.makedirs(g_dir, exist_ok=True)
                         a_out = os.path.join(g_dir, "audio.wav")
                         from audio_pipeline import mix_tracks_streaming
                         ffmpeg_exe = ensure_ffmpeg_available()
+                        self._render_job.set_state("PREPARING_AUDIO")
                         audio_settings = copy.deepcopy(
                             group_render_configs[gi].get(
                                 "global_audio", {}
                             )
                         )
-                        deferred_ambient = (
-                            loop_enabled
-                            and any(
-                                item.get("enabled", True)
-                                and item.get("filepath")
-                                and os.path.isfile(item["filepath"])
-                                for item in audio_settings.get(
-                                    "ambient_tracks", []
-                                )
+                        audio_settings["ambience_mixer"] = copy.deepcopy(
+                            group_render_configs[gi].get(
+                                "ambience_mixer", {}
                             )
                         )
+                        from ambient_engine import has_active_ambience
+                        deferred_ambient = (
+                            loop_enabled
+                            and has_active_ambience(audio_settings)
+                        )
                         if deferred_ambient:
-                            audio_settings["ambient_tracks"] = []
+                            audio_settings["ambience_mixer"] = {
+                                "enabled": False, "sources": {}
+                            }
+                        crossfade_duration = float(
+                            group_render_configs[gi].get(
+                                "scene_transition", {}
+                            ).get("crossfade_duration", 4.0)
+                        )
                         _, dur, timestamps = mix_tracks_streaming(
-                            ffmpeg_exe, analyses, valid_tracks, a_out, 4.0,
+                            ffmpeg_exe, analyses, valid_tracks, a_out,
+                            crossfade_duration,
                             cancel_event=self._render_cancel_event,
                             audio_settings=audio_settings,
                         )
@@ -501,8 +671,8 @@ class Stage5Render(tk.Frame):
                         else:
                             _actual_codec = render_video_codec
                         _codec_label = "GPU" if _actual_codec != "libx264" else "CPU"
-                        self.after(
-                            0, lambda ii=gi, label=_codec_label:
+                        self.app.post_ui(
+                            lambda ii=gi, label=_codec_label:
                             self._update_queue(
                                 ii, t("render.encoding", codec=label)
                             )
@@ -543,29 +713,42 @@ class Stage5Render(tk.Frame):
                                     eta = t("render.etaSec", seconds=int(remaining))
                             else:
                                 eta = ""
-                            self.after(0, lambda: (
+                            self.app.post_ui(lambda
+                                cl=cl, frac=frac, ii=ii, tt=tt, eta=eta,
+                                overall=overall: (
                                 self.render_status.configure(text=t("render.encodingProgress", codec=cl, percent=int(frac*100), current=ii+1, total=tt, eta=eta)),
                                 self._render_set_progress(ii, tt, overall),
                             ))
 
                         v_out = os.path.join(g_dir, f"mix_{gi+1}.mp4")
                         from video_gen import generate_video
+                        self._render_job.set_state("PREPARING_VIDEO")
+                        self._render_job.set_state("STARTING_ENCODER")
                         generate_video(
                             analyses, a_out, v_out, width=w, height=h,
                             visual_config_path=vc, timestamps=timestamps,
-                            crossfade_duration=4.0,
+                            crossfade_duration=crossfade_duration,
                             frame_progress_callback=_on_frame_progress,
                             fps=render_fps, video_codec=render_video_codec,
                             audio_codec=render_audio_codec,
                             video_bitrate=render_video_bitrate,
                             audio_bitrate=render_audio_bitrate,
+                            process_callback=_encoder_started,
+                            cancel_event=self._render_cancel_event,
+                            log_callback=_rlog,
                         )
+                        self._render_job.set_state("FINALIZING")
+                        final_output = v_out
+                        expected_duration = dur
                         txt_path = os.path.join(g_dir, "timestamps.txt")
                         self._save_timestamps_txt(txt_path, timestamps, dur)
                         if loop_enabled:
                             if self._render_cancel_event.is_set():
                                 raise RuntimeError(t("render.cancelled"))
-                            self.after(0, lambda ii=gi: self._update_queue(ii, t("render.loopVideo")))
+                            self.app.post_ui(
+                                lambda ii=gi:
+                                self._update_queue(ii, t("render.loopVideo"))
+                            )
                             repeat_plan = build_repeat_plan(
                                 dur, enabled=True,
                                 mode=repeat_mode,
@@ -601,90 +784,214 @@ class Stage5Render(tk.Frame):
                                 mix_ambient_over_media(
                                     ffmpeg_exe, loop_out, ambient_out,
                                     repeat_plan.output_seconds,
-                                    group_render_configs[gi].get(
-                                        "global_audio", {}
-                                    ),
+                                    {
+                                        **group_render_configs[gi].get(
+                                            "global_audio", {}
+                                        ),
+                                        "ambience_mixer":
+                                        group_render_configs[gi].get(
+                                            "ambience_mixer", {}
+                                        ),
+                                    },
                                     audio_codec=render_audio_codec,
                                     audio_bitrate=render_audio_bitrate,
                                     cancel_event=self._render_cancel_event,
                                 )
                                 os.replace(ambient_out, loop_out)
+                            final_output = loop_out
+                            expected_duration = repeat_plan.output_seconds
+                        self._render_job.set_state("VALIDATING_OUTPUT")
+                        validation = validate_media_output(
+                            final_output, ensure_ffprobe_available(), w, h,
+                            expected_duration, require_audio=True,
+                        )
+                        self._render_job.last_output = validation
+                        successful_outputs += 1
                         done_text = t("render.completedWithLoop") if loop_enabled else t("render.completed")
-                        self.after(0, lambda ii=gi, text=done_text: self._update_queue(ii, text))
-                        self.after(0, lambda ii=gi, tt=total_groups: self._render_set_progress(ii+1, tt, (ii+1)/max(tt, 1)))
+                        self.app.post_ui(
+                            lambda ii=gi, text=done_text:
+                            self._update_queue(ii, text)
+                        )
+                        self.app.post_ui(
+                            lambda ii=gi, tt=total_groups:
+                            self._render_set_progress(
+                                ii + 1, tt, (ii + 1) / max(tt, 1)
+                            )
+                        )
                     except Exception as group_error:
                         render_errors += 1
                         _cancel_text = t("render.cancelled")
                         if _cancel_text in str(group_error) or isinstance(group_error, RenderCancelledError):
-                            self.after(0, lambda ii=gi: self._update_queue(ii, t("render.cancelled")))
+                            self.app.post_ui(
+                                lambda ii=gi:
+                                self._update_queue(ii, t("render.cancelled"))
+                            )
+                            raise
                         else:
-                            self.after(0, lambda ii=gi, err=group_error: self._update_queue(ii, t("render.groupError", error=err)))
+                            self.app.post_ui(
+                                lambda ii=gi, err=group_error:
+                                self._update_queue(
+                                    ii, t("render.groupError", error=err)
+                                )
+                            )
                             import traceback
                             _tb = traceback.format_exc()
+                            last_render_error = (
+                                str(group_error), self._render_job.stage, _tb
+                            )
                             _rlog(f"group {gi+1} render error: {group_error}\n{_tb}")
                 if self.app.project and self.app.project.project_dir and len(self.app.stages) > 0:
-                    s0 = self.app.stages[0]
-                    if hasattr(s0, 'get_target_seconds'):
-                        self.app.project.target_duration = s0.get_target_seconds()
-                    if hasattr(s0, 'get_tolerance'):
-                        self.app.project.tolerance = s0.get_tolerance()
+                    self.app.project.target_duration = project_target_duration
+                    self.app.project.tolerance = project_tolerance
                     with self.app._project_save_lock:
                         self.app.project.save(
                             analyses=all_analysis_map,
-                            video_groups=self.app.video_groups,
+                            video_groups=render_groups,
                             app_state=project_state_snapshot,
                         )
-                if render_errors:
-                    self.after(0, lambda: (
+                if render_errors or not successful_outputs:
+                    self._render_job.set_state("FAILED")
+                    error, stage, detail = last_render_error or (
+                        t("render.renderErrors", errors=render_errors, path=out_dir),
+                        self._render_job.stage,
+                        "",
+                    )
+                    self.app.post_ui(lambda: (
                         self.render_status.configure(text=t("render.completedWithErrors", count=render_errors)),
                         self.retry_render_btn.configure(state=tk.NORMAL),
-                        messagebox.showwarning(t("common.warning"), t("render.renderErrors", errors=render_errors, path=out_dir)),
                     ))
+                    self.app.post_ui(
+                        lambda err=error, st=stage, extra=detail:
+                        self._show_render_error_dialog(
+                            err, st, self._render_job.log_path,
+                            self._render_job.job_id, extra,
+                        )
+                    )
                 else:
-                    self.after(0, lambda: (
-                        self.render_status.configure(text=t("render.completed")),
-                        self.retry_render_btn.configure(state=tk.DISABLED),
-                        messagebox.showinfo(t("common.done"), t("render.outputSaved", path=out_dir)),
-                    ))
+                    self._render_job.set_state("COMPLETED")
+                    validation = dict(self._render_job.last_output or {})
+                    self._post_verified_completion(validation, out_dir)
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
                 _cancel_text = t("render.cancelled")
                 is_cancel = _cancel_text in str(e) or isinstance(e, RenderCancelledError)
                 error_text = str(e)
-                try:
-                    log_dir = (os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
-                               else os.path.dirname(os.path.abspath(__file__)))
-                    with open(os.path.join(log_dir, "render_error.log"), "w", encoding="utf-8") as ef:
-                        ef.write(f"{e}\n\n{tb}\n")
-                except Exception:
-                    pass
+                failure_stage = self._render_job.stage
+                _rlog(f"render failed at {failure_stage}: {e}\n{tb}")
                 if is_cancel:
-                    self.after(0, lambda: (
+                    self._render_job.set_state("CANCELLED")
+                    self.app.post_ui(lambda: (
                         self.render_status.configure(text=t("render.cancelled")),
                         self.retry_render_btn.configure(state=tk.NORMAL),
                     ))
                 else:
-                    self.after(
-                        0, lambda detail=error_text:
+                    self._render_job.set_state("FAILED")
+                    self.app.post_ui(
+                        lambda detail=error_text:
                         self.render_status.configure(
                             text=t("render.renderError", error=detail)
                         )
                     )
-                    self.after(0, lambda: self.retry_render_btn.configure(state=tk.NORMAL))
-                    self.after(
-                        0, lambda detail=error_text: messagebox.showerror(
-                            t("common.error"),
-                            t("render.renderErrorDetail", error=detail),
+                    self.app.post_ui(
+                        lambda: self.retry_render_btn.configure(
+                            state=tk.NORMAL
+                        )
+                    )
+                    self.app.post_ui(
+                        lambda detail=error_text, trace=tb, st=failure_stage:
+                        self._show_render_error_dialog(
+                            detail, st,
+                            self._render_job.log_path,
+                            self._render_job.job_id, trace,
                         )
                     )
             finally:
                 def _restore():
                     self.render_btn.configure(state=tk.NORMAL, text=t("render.startAll"))
                     self.cancel_render_btn.configure(state=tk.DISABLED, text=t("render.cancelAll"))
-                self.after(0, _restore)
+                    self._set_app_navigation_locked(False)
+                self.app.post_ui(_restore)
 
+        self._set_app_navigation_locked(True)
         threading.Thread(target=run, daemon=True).start()
+
+    def _show_render_error_dialog(
+        self, error, stage, log_path, job_id, traceback_text="",
+    ):
+        details = (
+            f"{t('renderFailure.job')}: {job_id}\n"
+            f"{t('renderFailure.stage')}: {stage}\n"
+            f"{t('renderFailure.log')}: {log_path}\n\n{error}"
+        )
+        if traceback_text:
+            details += f"\n\n{traceback_text}"
+        window = tk.Toplevel(self)
+        window.title(t("renderFailure.title"))
+        window.transient(self.winfo_toplevel())
+        window.geometry("760x430")
+        window.minsize(560, 300)
+        window.configure(bg=self._a.THEME["bg_main"])
+        text_widget = tk.Text(
+            window, wrap="word", bg=self._a.THEME["bg_input"],
+            fg=self._a.THEME["fg"], relief=tk.FLAT, padx=12, pady=12,
+        )
+        text_widget.insert("1.0", details)
+        text_widget.configure(state=tk.DISABLED)
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=12, pady=(12, 6))
+        buttons = tk.Frame(window, bg=self._a.THEME["bg_main"])
+        buttons.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        def open_path(path):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(path)
+                else:
+                    subprocess.Popen(["xdg-open", path])
+            except OSError as open_error:
+                messagebox.showerror(t("common.error"), str(open_error))
+
+        def copy_details():
+            window.clipboard_clear()
+            window.clipboard_append(details)
+            window.update_idletasks()
+
+        def retry():
+            window.destroy()
+            self.after(0, self._retry_render)
+
+        for label, command in (
+            (t("renderFailure.openLog"), lambda: open_path(log_path)),
+            (t("renderFailure.openFolder"), lambda: open_path(os.path.dirname(log_path))),
+            (t("renderFailure.copyDetails"), copy_details),
+            (t("common.retry"), retry),
+            (t("common.close"), window.destroy),
+        ):
+            self._a.styled_button(
+                buttons, label, command, padx=8, pady=5,
+            ).pack(side=tk.LEFT, padx=(0, 6))
+
+    def _show_verified_completion(self, validation, output_dir):
+        self.render_status.configure(text=t("render.completed"))
+        self.retry_render_btn.configure(state=tk.DISABLED)
+        if validation:
+            message = t(
+                "render.outputVerified",
+                path=validation["path"],
+                duration=format_duration(validation["duration"]),
+                width=validation["width"],
+                height=validation["height"],
+                size=f"{validation['size'] / (1024 * 1024):.1f} MB",
+            )
+        else:
+            message = t("render.outputSaved", path=output_dir)
+        messagebox.showinfo(t("common.done"), message)
+
+    def _post_verified_completion(self, validation, output_dir):
+        self.app.post_ui(
+            lambda result=validation, directory=output_dir:
+            self._show_verified_completion(result, directory)
+        )
 
     def _collect_render_config(self):
         if len(self.app.stages) > 4 and hasattr(self.app.stages[4], '_collect_config'):
@@ -708,7 +1015,7 @@ class Stage5Render(tk.Frame):
         if not self._last_render_dir:
             messagebox.showinfo(t("common.retry"), t("render.noPrevious"))
             return
-        self._start_render(self._last_render_dir, skip_completed=True)
+        self._start_render(self._last_render_dir)
 
     def _update_queue(self, idx, text):
         group = self.app.video_groups[idx]

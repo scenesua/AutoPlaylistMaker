@@ -15,8 +15,15 @@ from video_gen import LiveFrameRenderer, _find_ffmpeg_exe, generate_video
 
 
 RESOLUTIONS = {
+    "3840x2160": (3840, 2160),
+    "2560x1440": (2560, 1440),
     "1920x1080": (1920, 1080),
+    "1440x1080": (1440, 1080),
+    "1080x1350": (1080, 1350),
+    "960x540": (960, 540),
+    "854x480": (854, 480),
     "1280x720": (1280, 720),
+    "640x360": (640, 360),
     "1080x1920": (1080, 1920),
     "1080x1080": (1080, 1080),
 }
@@ -126,6 +133,20 @@ def main():
         y += card.height
     contact.save(os.path.join(root, "comparison_contact_sheet.png"))
     report_path = os.path.join(root, "report.json")
+    proxy = Image.open(os.path.join(root, "960x540_preview.png")).convert("RGB")
+    for source_label in ("1920x1080", "3840x2160"):
+        source = Image.open(
+            os.path.join(root, f"{source_label}_preview.png")
+        ).convert("RGB").resize(proxy.size, Image.Resampling.LANCZOS)
+        delta = np.abs(
+            np.asarray(source, dtype=np.int16)
+            - np.asarray(proxy, dtype=np.int16)
+        )
+        results[f"{source_label}->960x540"] = {
+            "mean_absolute_error": float(delta.mean()),
+            "p99_absolute_error": float(np.percentile(delta, 99)),
+            "passed": float(delta.mean()) < 2.0,
+        }
     with open(report_path, "w", encoding="utf-8") as handle:
         json.dump(results, handle, ensure_ascii=False, indent=2)
     if not all(item["passed"] for item in results.values()):

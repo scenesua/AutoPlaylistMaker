@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "يمزج كل عنصر تحكم بين نوع واحد من الأجواء؛ يتم تحديد ملفات المكتبة تلقائيًا."
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "common": {
     "save": "حفظ",
     "cancel": "إلغاء",
@@ -60,7 +112,19 @@
     "restoringUi": "استعادة بيانات المشروع والواجهة",
     "projectFailed": "تعذر تحميل المشروع.\n\n{error}",
     "waveformCount": "تحضير الموجات {current}/{total} ({percent}%)",
-    "sliderResetHint": "Alt+نقر: استعادة القيمة الافتراضية"
+    "sliderResetHint": "Alt+نقر: استعادة القيمة الافتراضية",
+    "analysisStage": {
+      "beats": "كشف النبضات والبداية",
+      "cache": "إعداد ذاكرة التخزين المؤقت للتحليل",
+      "complete": "اكتمل تحليل الملف",
+      "decoding": "فك تشفير الصوت",
+      "frequency": "إعداد بيانات التردد",
+      "loudness": "تحليل جهارة الصوت والطاقة",
+      "metadata": "قراءة البيانات الوصفية الصوتية",
+      "waveform": "توليد بيانات الشكل الموجي والمستوى",
+      "tools": "إعداد وحدات التحليل والأدوات الصوتية"
+    },
+    "preparingTools": "إعداد أدوات التحليل الصوتي"
   },
   "navigation": {
     "stage0": "1/6 مشروع + استيراد",
@@ -78,7 +142,9 @@
     "unsavedTitle": "تغييرات غير محفوظة",
     "unsavedBody": "لديك تغييرات غير محفوظة. هل تريد الخروج بدون حفظ؟",
     "projectLabel": "المشروع: {name}",
-    "autoSaveFailed": "فشل الحفظ التلقائي: {error}"
+    "autoSaveFailed": "فشل الحفظ التلقائي: {error}",
+    "exitFullscreen": "الخروج من وضع ملء الشاشة",
+    "fullscreen": "شاشة كاملة"
   },
   "project": {
     "title": "المشروع",
@@ -421,7 +487,22 @@
     "runDistributionFirst": "قم بتشغيل التوزيع أولاً",
     "stop": "قف",
     "textFont": "خط النص:",
-    "trackRange": "المسارات {start} - {end} من {total}"
+    "trackRange": "المسارات {start} - {end} من {total}",
+    "actualPreviewResolution": "المعاينة الفعلية: {width} × {height}",
+    "crossfadeDuration": "التلاشي المتداخل (ثواني)",
+    "previewAudio": "جارٍ تحضير معاينة الصوت...",
+    "previewConnecting": "جارٍ توصيل مشغل المعاينة...",
+    "previewEffects": "تحضير المشاهد والمؤثرات...",
+    "previewQualityAuto": "المعاينة: تلقائي",
+    "previewQualityCustom": "المعاينة: مخصص",
+    "previewQualityHigh": "المعاينة: عالية",
+    "previewQualityLow": "المعاينة: منخفض",
+    "previewQualityMedium": "معاينة: متوسطة",
+    "previewRangeOne": "1 المسار: المسار الحالي",
+    "previewRangeTwo": "2 مسارات: الحالي + التالي",
+    "previewReadyDetail": "{range} · {width} × {height} · {duration:.1f} s",
+    "previewTimeline": "جارٍ حساب المخطط الزمني للمعاينة...",
+    "sceneTransition": "انتقال المشهد"
   },
   "render": {
     "title": "إخراج",
@@ -506,7 +587,9 @@
     "renderErrors": "فشل عرض (عروض) {errors}.\nالنواتج المكتملة: {path}",
     "res1080": "كامل الوضوح 1080 بكسل",
     "res4k": "الترا اتش دي 4K",
-    "res720": "HD 720p"
+    "res720": "HD 720p",
+    "noAnalyzedTracks": "فشل: لا توجد مسارات صوتية تم تحليلها",
+    "outputVerified": "اكتمل العرض وتم التحقق من صحة الإخراج.\n\nملف الإخراج: {path} \nالمدة الفعلية: {duration} \nالدقة الفعلية: {width} × {height} \nحجم الملف: {size}"
   },
   "time": {
     "hours": "{count}س",
@@ -543,8 +626,30 @@
     "categoryOther": "أخرى",
     "audioResponse": "الاستجابة الصوتية",
     "style": "المظهر والأسلوب",
-    "transform": "الموقف والحجم"
+    "transform": "الموقف والحجم",
+    "openRack": "فتح حامل التأثيرات",
+    "rackTitle": "حامل التأثيرات",
+    "fixedOrderHint": "تعمل أزرار النقل داخل مرحلة التركيب نفسها فقط؛ وتتبع المراحل الأخرى ترتيب التصيير الفعلي.",
+    "settings": "الإعدادات",
+    "missingFile": "الملف غير موجود",
+    "summary": "نشط {active}/{total} · تحذيرات {warnings}",
+    "stageBackground": "1 · الخلفية",
+    "stageOverlay": "2 · تراكبات الصور",
+    "stageText": "3 · النص",
+    "stageVisualizer": "4 · المرئيات",
+    "stageFade": "5 · التلاشي",
+    "stageBeat": "6 · تأثيرات الإيقاع",
+    "stagePost": "7 · المعالجة اللاحقة",
+    "stageVisibility": "8 · الظهور",
+    "ambienceMixer": "أجواء",
+    "categoryAudioEffects": "المؤثرات الصوتية",
+    "stageAudio": "حافلة الصوت",
+    "defaultEffects": "التأثيرات الافتراضية",
+    "stageGlobalAudio": "حافلة الموسيقى الرئيسية",
+    "stageTransition": "انتقال المشهد"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "title": "الصوت العام",
     "musicMaster": "مستوى الموسيقى (dB)",

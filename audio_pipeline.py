@@ -6,6 +6,8 @@ import math
 import subprocess
 import sys
 import logging
+import tempfile
+from pathlib import Path
 from i18n import t
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
@@ -41,6 +43,10 @@ def measure_loudness(filepath, ffmpeg_exe=None):
 
 
 def _run(command, cancel_event=None):
+    logger.debug(
+        "FFmpeg audio command: chars=%d args=%d command=%r",
+        sum(len(str(item)) + 1 for item in command), len(command), command,
+    )
     process = subprocess.Popen(
         command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace",
@@ -62,6 +68,182 @@ def _run(command, cancel_event=None):
             process.returncode, command, stdout, stderr,
         )
         raise RuntimeError((stderr or stdout or t("errors.ffmpegAudioFailed")).strip())
+
+
+def _filter_script(directory, name, filters):
+    path = Path(directory) / f"{name}.txt"
+    graph = ";".join(filters)
+    path.write_text(graph, encoding="utf-8")
+    logger.debug("FFmpeg filter script %s: %s", path, graph)
+    return str(path)
+
+
+def _mix_audio_files(
+    ffmpeg_exe, inputs, output, duration, directory, name,
+    cancel_event=None,
+):
+    command = [ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y"]
+    for path in inputs:
+        command += ["-i", str(path)]
+    labels = "".join(f"[{index}:a]" for index in range(len(inputs)))
+    script = _filter_script(directory, name, [
+        f"{labels}amix=inputs={len(inputs)}:normalize=0:"
+        f"duration=longest:dropout_transition=0,"
+        f"atrim=duration={duration:.6f}[out]"
+    ])
+    command += [
+        "-filter_complex_script", script, "-map", "[out]",
+        "-ar", "44100", "-ac", "2", "-c:a", "pcm_f32le", str(output),
+    ]
+    _run(command, cancel_event)
+
+
+def _render_ambient_batch(
+    ffmpeg_exe, segments, chunk_start, chunk_duration, output,
+    directory, name, cancel_event=None,
+):
+    command = [ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y"]
+    filters = []
+    labels = []
+    chunk_end = chunk_start + chunk_duration
+    for index, segment in enumerate(segments):
+        segment_start = float(segment["start"])
+        segment_end = segment_start + float(segment["duration"])
+        clip_start = max(chunk_start, segment_start)
+        clip_end = min(chunk_end, segment_end)
+        clip_duration = clip_end - clip_start
+        if segment["loop_input"]:
+            command += ["-stream_loop", "-1"]
+        source_offset = float(segment["source_offset"]) + (
+            clip_start - segment_start
+        )
+        if source_offset > 0:
+            command += ["-ss", f"{source_offset:.6f}"]
+        command += ["-i", segment["path"]]
+        gain = 10 ** (float(segment["gain_db"]) / 20)
+        pan = float(segment["pan"])
+        left = 1.0 if pan <= 0 else 1.0 - pan
+        right = 1.0 if pan >= 0 else 1.0 + pan
+        chain = (
+            f"[{index}:a]atrim=duration={clip_duration:.6f},"
+            "asetpts=PTS-STARTPTS,aresample=44100,"
+            "aformat=sample_fmts=fltp:channel_layouts=stereo,highpass=f=20,"
+            f"volume={gain:.9f},"
+            f"pan=stereo|c0={left:.6f}*c0|c1={right:.6f}*c1,"
+            f"extrastereo=m={float(segment['width']):.6f}"
+        )
+        if clip_start == segment_start and segment["fade_in"] > 0:
+            chain += (
+                f",afade=t=in:st=0:d={min(segment['fade_in'], clip_duration / 2):.6f}:"
+                "curve=qsin"
+            )
+        if clip_end == segment_end and segment["fade_out"] > 0:
+            fade = min(float(segment["fade_out"]), clip_duration / 2)
+            chain += (
+                f",afade=t=out:st={max(0, clip_duration - fade):.6f}:"
+                f"d={fade:.6f}:curve=qsin"
+            )
+        delay_ms = max(0, round((clip_start - chunk_start) * 1000))
+        label = f"s{index}"
+        filters.append(f"{chain},adelay={delay_ms}:all=1[{label}]")
+        labels.append(label)
+    joined = "".join(f"[{label}]" for label in labels)
+    filters.append(
+        f"{joined}amix=inputs={len(labels)}:normalize=0:"
+        "duration=longest:dropout_transition=0,"
+        f"atrim=duration={chunk_duration:.6f}[out]"
+    )
+    script = _filter_script(directory, name, filters)
+    command += [
+        "-filter_complex_script", script, "-map", "[out]",
+        "-ar", "44100", "-ac", "2", "-c:a", "pcm_f32le", str(output),
+    ]
+    _run(command, cancel_event)
+
+
+def render_ambient_bus(
+    ffmpeg_exe, audio_settings, duration, output_path, cancel_event=None,
+):
+    """Render ambience in bounded chunks so Windows commands stay short."""
+    from ambient_engine import build_ambient_plan
+
+    plan = build_ambient_plan(audio_settings, duration)
+    if not plan:
+        return False
+    chunk_seconds = 120.0
+    batch_size = 8
+    with tempfile.TemporaryDirectory(prefix="apmamb_") as directory:
+        chunks = []
+        chunk_start = 0.0
+        chunk_index = 0
+        while chunk_start < duration:
+            chunk_duration = min(chunk_seconds, duration - chunk_start)
+            chunk_end = chunk_start + chunk_duration
+            segments = [
+                segment for segment in plan
+                if float(segment["start"]) < chunk_end
+                and float(segment["start"]) + float(segment["duration"])
+                > chunk_start
+            ]
+            layers = []
+            for batch_index in range(0, len(segments), batch_size):
+                layer = Path(directory) / (
+                    f"l{chunk_index:04d}_{batch_index // batch_size:03d}.wav"
+                )
+                _render_ambient_batch(
+                    ffmpeg_exe, segments[batch_index:batch_index + batch_size],
+                    chunk_start, chunk_duration, layer, directory,
+                    f"f{chunk_index:04d}_{batch_index // batch_size:03d}",
+                    cancel_event,
+                )
+                layers.append(layer)
+            mix_level = 0
+            while len(layers) > 1:
+                combined = []
+                for batch_index in range(0, len(layers), batch_size):
+                    inputs = layers[batch_index:batch_index + batch_size]
+                    target = Path(directory) / (
+                        f"m{chunk_index:04d}_{mix_level:02d}_"
+                        f"{len(combined):03d}.wav"
+                    )
+                    _mix_audio_files(
+                        ffmpeg_exe, inputs, target, chunk_duration,
+                        directory,
+                        f"mf{chunk_index:04d}_{mix_level:02d}_"
+                        f"{len(combined):03d}",
+                        cancel_event,
+                    )
+                    combined.append(target)
+                layers = combined
+                mix_level += 1
+            chunk = Path(directory) / f"c{chunk_index:04d}.wav"
+            if layers:
+                os.replace(layers[0], chunk)
+            else:
+                _run([
+                    ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                    "-t", f"{chunk_duration:.6f}",
+                    "-c:a", "pcm_f32le", str(chunk),
+                ], cancel_event)
+            chunks.append(chunk)
+            chunk_start = chunk_end
+            chunk_index += 1
+        concat_file = Path(directory) / "list.ffconcat"
+        concat_file.write_text(
+            "ffconcat version 1.0\n" + "".join(
+                f"file '{chunk.name}'\n" for chunk in chunks
+            ),
+            encoding="utf-8",
+        )
+        _run([
+            ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-af", f"apad,atrim=duration={float(duration):.6f}",
+            "-ar", "44100", "-ac", "2", "-c:a", "pcm_f32le",
+            str(output_path),
+        ], cancel_event)
+    return True
 
 
 def mix_tracks_streaming(
@@ -182,65 +364,36 @@ def mix_tracks_streaming(
         music_bus = "music_bus_main"
         current = music_bus
         stem_labels["music"] = "music_stem"
-    ambient_specs = [
-        spec for spec in audio_settings.get("ambient_tracks", [])
-        if spec.get("enabled", True)
-        and spec.get("filepath")
-        and os.path.isfile(spec["filepath"])
-    ]
-    ambient_labels = []
-    next_input = len(usable)
-    for ambient_index, spec in enumerate(ambient_specs):
-        filepath = spec["filepath"]
-        # Two offset streams run at slightly different time-preserving speeds.
-        # Their combined pattern takes far longer to repeat and masks a single
-        # source boundary without materializing the final timeline in RAM.
-        for copy_index, (offset, speed) in enumerate((
-            (0.0, 0.997), (0.73, 1.013),
-        )):
-            command += [
-                "-stream_loop", "-1", "-ss", str(offset), "-i", filepath
-            ]
-            label = f"amb{ambient_index}_{copy_index}"
-            individual_db = float(spec.get("volume_db", -18.0))
-            pan = max(-1.0, min(1.0, float(spec.get("pan", 0.0))))
-            left = 1.0 if pan <= 0 else 1.0 - pan
-            right = 1.0 if pan >= 0 else 1.0 + pan
-            gain = 10 ** (individual_db / 20)
+    ambient_path = None
+    from ambient_engine import has_active_ambience
+    if has_active_ambience(audio_settings):
+        fd, ambient_path = tempfile.mkstemp(
+            prefix="apmamb_", suffix=".wav"
+        )
+        os.close(fd)
+        os.unlink(ambient_path)
+        ambient_rendered = render_ambient_bus(
+            ffmpeg_exe, audio_settings, elapsed, ambient_path, cancel_event
+        )
+        if ambient_rendered:
+            ambient_input = len(usable)
+            command += ["-i", ambient_path]
             filters.append(
-                f"[{next_input}:a]aresample=44100,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                f"atempo={speed:.6f},atrim=duration={elapsed:.6f},"
-                "asetpts=PTS-STARTPTS,"
-                f"volume={gain * (0.62 if copy_index == 0 else 0.38):.9f},"
-                f"pan=stereo|c0={left:.6f}*c0|c1={right:.6f}*c1,"
-                f"extrastereo=m={max(0.0, min(2.0, float(spec.get('width', 1.0)))):.6f}"
-                f"[{label}]"
+                f"[{ambient_input}:a]atrim=duration={elapsed:.6f},"
+                "asetpts=PTS-STARTPTS[ambient_bus]"
             )
-            ambient_labels.append(label)
-            next_input += 1
-    if ambient_labels:
-        joined = "".join(f"[{label}]" for label in ambient_labels)
-        ambient_master = 10 ** (
-            float(audio_settings.get("ambient_master_db", -18.0)) / 20
-        )
-        filters.append(
-            f"{joined}amix=inputs={len(ambient_labels)}:"
-            "normalize=0:duration=shortest:dropout_transition=0,"
-            f"volume={ambient_master:.9f}[ambient_bus]"
-        )
-        ambient_bus = "ambient_bus"
-        if stem_output_paths.get("ambient"):
+            ambient_bus = "ambient_bus"
+            if stem_output_paths.get("ambient"):
+                filters.append(
+                    "[ambient_bus]asplit=2[ambient_bus_main][ambient_stem]"
+                )
+                ambient_bus = "ambient_bus_main"
+                stem_labels["ambient"] = "ambient_stem"
             filters.append(
-                "[ambient_bus]asplit=2[ambient_bus_main][ambient_stem]"
+                f"[{music_bus}][{ambient_bus}]amix=inputs=2:"
+                "normalize=0:duration=first:dropout_transition=0[master_sum]"
             )
-            ambient_bus = "ambient_bus_main"
-            stem_labels["ambient"] = "ambient_stem"
-        filters.append(
-            f"[{music_bus}][{ambient_bus}]amix=inputs=2:"
-            "normalize=0:duration=first:dropout_transition=0[master_sum]"
-        )
-        current = "master_sum"
+            current = "master_sum"
 
     ceiling = min(-0.1, float(
         audio_settings.get("true_peak_dbtp", -1.0)
@@ -266,7 +419,14 @@ def mix_tracks_streaming(
         command += [
             "-map", f"[{stem_label}]", "-c:a", "pcm_s16le", stem_path,
         ]
-    _run(command, cancel_event)
+    try:
+        _run(command, cancel_event)
+    finally:
+        if ambient_path:
+            try:
+                os.unlink(ambient_path)
+            except OSError:
+                pass
     return output_path, elapsed, timestamps
 
 
@@ -275,63 +435,29 @@ def mix_ambient_over_media(
     audio_codec="aac", audio_bitrate="320k", cancel_event=None,
 ):
     """Add one continuous ambience timeline after a video has been repeated."""
-    ambient_specs = [
-        spec for spec in audio_settings.get("ambient_tracks", [])
-        if spec.get("enabled", True)
-        and spec.get("filepath")
-        and os.path.isfile(spec["filepath"])
-    ]
-    if not ambient_specs:
+    from ambient_engine import has_active_ambience
+    if not has_active_ambience(audio_settings):
         raise ValueError("no active ambience tracks")
 
     duration = max(0.1, float(duration))
+    fd, ambient_path = tempfile.mkstemp(prefix="apmamb_", suffix=".wav")
+    os.close(fd)
+    os.unlink(ambient_path)
+    if not render_ambient_bus(
+        ffmpeg_exe, audio_settings, duration, ambient_path, cancel_event
+    ):
+        raise ValueError("no resolvable active ambience sources")
     command = [
         ffmpeg_exe, "-hide_banner", "-loglevel", "error", "-y",
-        "-i", input_path,
+        "-i", input_path, "-i", ambient_path,
     ]
     filters = [
         f"[0:a]aresample=44100,"
         "aformat=sample_fmts=fltp:channel_layouts=stereo,"
-        f"atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[music_bus]"
+        f"atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[music_bus]",
+        f"[1:a]atrim=duration={duration:.6f},"
+        "asetpts=PTS-STARTPTS[ambient_bus]",
     ]
-    ambient_labels = []
-    next_input = 1
-    for ambient_index, spec in enumerate(ambient_specs):
-        for copy_index, (offset, speed) in enumerate((
-            (0.0, 0.997), (0.73, 1.013),
-        )):
-            command += [
-                "-stream_loop", "-1", "-ss", str(offset),
-                "-i", spec["filepath"],
-            ]
-            label = f"amb{ambient_index}_{copy_index}"
-            individual_db = float(spec.get("volume_db", -18.0))
-            pan = max(-1.0, min(1.0, float(spec.get("pan", 0.0))))
-            left = 1.0 if pan <= 0 else 1.0 - pan
-            right = 1.0 if pan >= 0 else 1.0 + pan
-            gain = 10 ** (individual_db / 20)
-            filters.append(
-                f"[{next_input}:a]aresample=44100,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                f"atempo={speed:.6f},atrim=duration={duration:.6f},"
-                "asetpts=PTS-STARTPTS,"
-                f"volume={gain * (0.62 if copy_index == 0 else 0.38):.9f},"
-                f"pan=stereo|c0={left:.6f}*c0|c1={right:.6f}*c1,"
-                f"extrastereo=m={max(0.0, min(2.0, float(spec.get('width', 1.0)))):.6f}"
-                f"[{label}]"
-            )
-            ambient_labels.append(label)
-            next_input += 1
-
-    joined = "".join(f"[{label}]" for label in ambient_labels)
-    ambient_master = 10 ** (
-        float(audio_settings.get("ambient_master_db", -18.0)) / 20
-    )
-    filters.append(
-        f"{joined}amix=inputs={len(ambient_labels)}:"
-        "normalize=0:duration=shortest:dropout_transition=0,"
-        f"volume={ambient_master:.9f}[ambient_bus]"
-    )
     filters.append(
         "[music_bus][ambient_bus]amix=inputs=2:"
         "normalize=0:duration=first:dropout_transition=0[master_sum]"
@@ -350,7 +476,13 @@ def mix_ambient_over_media(
         "-c:v", "copy", "-c:a", audio_codec, "-b:a", str(audio_bitrate),
         "-t", f"{duration:.6f}", "-movflags", "+faststart", output_path,
     ]
-    _run(command, cancel_event)
+    try:
+        _run(command, cancel_event)
+    finally:
+        try:
+            os.unlink(ambient_path)
+        except OSError:
+            pass
     return output_path
 
 

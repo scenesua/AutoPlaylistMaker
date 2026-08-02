@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 _lock = threading.Lock()
 _cached_path = None
+_cached_probe_path = None
 _cache_initialized = False
 
 
@@ -133,6 +134,47 @@ def ensure_ffmpeg_available(force_refresh=False):
     path = resolve_ffmpeg_executable(force_refresh=force_refresh)
     if not path:
         raise RuntimeError(t("errors.ffmpegNotFound"))
+    return path
+
+
+def resolve_ffprobe_executable():
+    """Return FFprobe beside FFmpeg, from PATH, or a common Windows install."""
+    global _cached_probe_path
+    if _cached_probe_path and _is_executable(_cached_probe_path):
+        return _cached_probe_path
+    ffmpeg = resolve_ffmpeg_executable()
+    candidates = []
+    probe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, probe_name))
+    if getattr(sys, "frozen", False):
+        bundle_root = os.path.dirname(sys.executable)
+        candidates.extend((
+            os.path.join(bundle_root, probe_name),
+            os.path.join(bundle_root, "_internal", probe_name),
+        ))
+    if ffmpeg:
+        candidates.append(os.path.join(
+            os.path.dirname(ffmpeg), probe_name,
+        ))
+    candidates.extend((shutil.which("ffprobe"), shutil.which("ffprobe.exe")))
+    if os.name == "nt":
+        candidates.extend((
+            r"C:\ffmpeg\bin\ffprobe.exe",
+            r"C:\Program Files\ffmpeg\bin\ffprobe.exe",
+        ))
+    for candidate in candidates:
+        if _is_executable(candidate):
+            _cached_probe_path = os.path.abspath(candidate)
+            return _cached_probe_path
+    return None
+
+
+def ensure_ffprobe_available():
+    path = resolve_ffprobe_executable()
+    if not path:
+        raise RuntimeError("FFprobe is required to validate rendered output.")
     return path
 
 

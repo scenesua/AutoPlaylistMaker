@@ -11,7 +11,9 @@ from repeat_settings import (
     hms_to_seconds,
 )
 from timeline_utils import should_render_visuals, normalize_visibility_settings
-from video_gen import _find_ffmpeg_exe, loop_video_repetitions
+from video_gen import (
+    _find_ffmpeg_exe, apply_visibility_window, loop_video_repetitions,
+)
 
 
 class RepeatSettingsTests(unittest.TestCase):
@@ -88,6 +90,41 @@ class RepeatSettingsTests(unittest.TestCase):
             )
             self.assertGreaterEqual(duration, 2.9)
             self.assertLess(duration, 3.2)
+
+    @unittest.skipUnless(_find_ffmpeg_exe(), "ffmpeg is required")
+    def test_visibility_filter_uses_final_timeline_and_preserves_audio(self):
+        ffmpeg = _find_ffmpeg_exe()
+        with tempfile.TemporaryDirectory() as root:
+            source = os.path.join(root, "source.mp4")
+            output = os.path.join(root, "visible.mp4")
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "color=c=white:s=64x64:d=10",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=10",
+                "-shortest", "-c:v", "libx264", "-c:a", "aac", source,
+            ], check=True)
+            apply_visibility_window(source, output, 10, {
+                "enabled": True, "turn_off_after": 2,
+                "restore_before_end": 2, "restore": True,
+                "black_color": "#000000",
+            })
+            for timestamp, expected in ((1, "white"), (4, "black"), (9, "white")):
+                frame = os.path.join(root, f"{timestamp}.raw")
+                subprocess.run([
+                    ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                    "-ss", str(timestamp), "-i", output,
+                    "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", frame,
+                ], check=True)
+                with open(frame, "rb") as handle:
+                    mean = sum(handle.read()) / (64 * 64)
+                if expected == "black":
+                    self.assertLess(mean, 20)
+                else:
+                    self.assertGreater(mean, 220)
+            probe = subprocess.run([
+                ffmpeg, "-hide_banner", "-i", output,
+            ], capture_output=True, text=True)
+            self.assertIn("Audio:", probe.stderr)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ import os
 import json
 import colorsys
 import math
+import logging
 import subprocess
 import threading
 from i18n import t, choice_id
@@ -27,6 +28,7 @@ from ffmpeg_service import (
 )
 
 _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+logger = logging.getLogger(__name__)
 
 
 class RenderCancelledError(RuntimeError):
@@ -258,12 +260,14 @@ def apply_visibility_window(
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 process.kill()
+            process.communicate()
             raise RenderCancelledError(t("render.cancelled"))
         if cancel_event is not None:
             cancel_event.wait(0.05)
         else:
             process.wait()
-    stderr = process.stderr.read().decode(errors="replace") if process.stderr else ""
+    _, stderr_bytes = process.communicate()
+    stderr = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
     if process.returncode:
         raise RuntimeError(stderr or "FFmpeg visibility filter failed")
     return output_path
@@ -283,6 +287,9 @@ for _fp in _font_search:
 
 
 DEFAULT_CONFIG = {
+    "layout": {
+        "version": 2, "reference_width": 1920, "reference_height": 1080,
+    },
     "background": {
         "image": None, "opacity": 1.0, "blur": 0,
         "darken": 0.0, "fit": "cover",
@@ -320,6 +327,16 @@ DEFAULT_CONFIG = {
         "custom_bold": False, "custom_italic": False, "custom_underline": False,
         "custom_color": "#ffffff",
         "custom_affects_by_effects": True,
+        "custom_opacity": 1.0,
+        "custom_outline_width": 0,
+        "custom_outline_color": "#000000",
+        "custom_background": False,
+        "custom_background_color": "#000000",
+        "custom_background_opacity": 0.5,
+        "custom_background_padding": 12,
+        "custom_start_seconds": 0.0,
+        "custom_end_seconds": 0.0,
+        "custom_target_track": 0,
     },
     "progress_bar": {
         "show": True, "position": "bottom", "height": 4,
@@ -332,6 +349,66 @@ DEFAULT_CONFIG = {
         "black_color": "#000000",
     },
 }
+
+SUPPORTED_EFFECT_IDS = frozenset({
+    "global_audio", "scene_transition", "background", "album", "logo",
+    "track_info", "custom_text", "visualizer", "ambience_mixer", "fade",
+    "beat", "crt", "visibility",
+})
+
+
+def validate_effect_plan(config):
+    unknown = sorted(
+        set(config.get("active_effects", ())) - SUPPORTED_EFFECT_IDS
+    )
+    if unknown:
+        raise ValueError("Unsupported active effect(s): " + ", ".join(unknown))
+    return config
+
+
+def scale_visual_config(config_dict, width, height):
+    """Map reference-space settings to one render target exactly once.
+
+    Project values remain in the 1920x1080 logical space. Normalized text
+    anchors are deliberately untouched; only pixel-valued properties are
+    transformed for the target frame.
+    """
+    config = merge_visual_config(config_dict)
+    layout = config.get("layout", {})
+    ref_w = max(1.0, float(layout.get("reference_width", 1920) or 1920))
+    ref_h = max(1.0, float(layout.get("reference_height", 1080) or 1080))
+    sx, sy = float(width) / ref_w, float(height) / ref_h
+    uniform = min(sx, sy)
+
+    def scaled(section, key, factor, minimum=0):
+        values = config.get(section, {})
+        if key in values:
+            value = float(values[key]) * factor
+            values[key] = max(minimum, int(round(value)))
+
+    scaled("background", "blur", uniform)
+    for overlay in config.get("overlays", {}).values():
+        for key, factor in (("x", sx), ("y", sy), ("width", uniform),
+                            ("corner_radius", uniform)):
+            if key in overlay:
+                overlay[key] = max(0, int(round(float(overlay[key]) * factor)))
+    for key, factor in (
+        ("x", sx), ("y", sy), ("width", uniform), ("height", uniform),
+        ("height_override", uniform), ("bar_width", uniform),
+        ("bar_gap", uniform), ("min_height", uniform),
+        ("corner_radius", uniform), ("glow", uniform),
+        ("line_width", uniform),
+    ):
+        scaled("visualizer", key, factor)
+    for key in (
+        "font_size", "sub_font_size", "custom_font_size", "shadow_offset",
+        "custom_outline_width", "custom_background_padding",
+    ):
+        scaled("text", key, uniform, 1)
+    for key in ("height", "margin"):
+        scaled("progress_bar", key, uniform, 1)
+    config["_layout_scale"] = uniform
+    return config
 
 
 def load_visual_config(config_path=None):
@@ -356,7 +433,7 @@ def merge_visual_config(config_dict=None):
             continue
         if section in config and isinstance(config[section], dict) and isinstance(values, dict):
             config[section].update({
-                key: value for key, value in values.items()
+                key: copy.deepcopy(value) for key, value in values.items()
                 if not key.startswith('_')
             })
         else:
@@ -364,9 +441,14 @@ def merge_visual_config(config_dict=None):
     return config
 
 
-def hex_to_rgb(hex_color):
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+def hex_to_rgb(hex_color, fallback=(255, 255, 255)):
+    value = str(hex_color or "").lstrip("#")
+    if len(value) != 6:
+        return fallback
+    try:
+        return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return fallback
 
 
 _FONT_FILE_CACHE = None
@@ -884,9 +966,14 @@ def apply_beat_effects(frame_arr, t, beat_times, effects_cfg, width, height):
 
     if effects_cfg.get('shake'):
         intensity = effects_cfg.get('shake_intensity', 3)
-        import random
-        shake_x = int((random.random() - 0.5) * 2 * intensity * pulse * scale)
-        shake_y = int((random.random() - 0.5) * 2 * intensity * pulse * scale)
+        shake_x = round(
+            math.sin((beat_idx + 1) * 17.17 + phase * 23.0)
+            * intensity * pulse * scale
+        )
+        shake_y = round(
+            math.cos((beat_idx + 1) * 11.73 + phase * 19.0)
+            * intensity * pulse * scale
+        )
         img = img.transform((orig_w, orig_h), Image.AFFINE,
                              (1, 0, shake_x, 0, 1, shake_y), resample=Image.BILINEAR)
 
@@ -993,6 +1080,82 @@ def draw_text_with_shadow(draw, pos, text, font, fill, shadow=True, shadow_color
     draw.text((x, y), text, fill=fill, font=font)
 
 
+def build_custom_text_layer(width, height, cfg, layout_scale=1.0):
+    text = str(cfg.get('custom_text', ''))
+    if not text:
+        return None
+    font = get_font(
+        int(cfg.get('custom_font_size', 36)),
+        cfg.get('custom_font_family'),
+    )
+    opacity = max(0.0, min(1.0, float(cfg.get('custom_opacity', 1.0))))
+    outline = max(0, int(cfg.get('custom_outline_width', 0)))
+    padding = max(0, int(cfg.get('custom_background_padding', 12)))
+    stroke = outline + (
+        max(1, round(layout_scale)) if cfg.get('custom_bold') else 0
+    )
+    spacing = max(1, round(4 * layout_scale))
+    probe = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
+    bbox = probe.multiline_textbbox(
+        (0, 0), text, font=font, spacing=spacing, stroke_width=stroke,
+    )
+    shadow_offset = int(cfg.get('shadow_offset', 3))
+    extra = max(0, shadow_offset if cfg.get('shadow') else 0)
+    local = Image.new('RGBA', (
+        max(1, bbox[2] - bbox[0] + padding * 2 + extra),
+        max(1, bbox[3] - bbox[1] + padding * 2 + extra),
+    ), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(local)
+    if cfg.get('custom_background', False):
+        color = hex_to_rgb(
+            cfg.get('custom_background_color', '#000000'), (0, 0, 0)
+        )
+        alpha = round(255 * opacity * max(0.0, min(
+            1.0, float(cfg.get('custom_background_opacity', 0.5))
+        )))
+        draw.rectangle((0, 0, local.width - extra, local.height - extra),
+                       fill=(*color, alpha))
+    origin = (padding - bbox[0], padding - bbox[1])
+    if cfg.get('shadow', True):
+        shadow = hex_to_rgb(
+            cfg.get('shadow_color', '#000000'), (0, 0, 0)
+        )
+        draw.multiline_text(
+            (origin[0] + shadow_offset, origin[1] + shadow_offset), text,
+            font=font, spacing=spacing, fill=(*shadow, round(150 * opacity)),
+            stroke_width=stroke,
+            stroke_fill=(*shadow, round(150 * opacity)),
+        )
+    color = hex_to_rgb(cfg.get('custom_color', '#ffffff'))
+    outline_color = hex_to_rgb(
+        cfg.get('custom_outline_color', '#000000'), (0, 0, 0)
+    )
+    draw.multiline_text(
+        origin, text, font=font, spacing=spacing,
+        fill=(*color, round(255 * opacity)), stroke_width=stroke,
+        stroke_fill=(*outline_color, round(255 * opacity)),
+    )
+    if cfg.get('custom_underline', False):
+        y = min(local.height - 1, origin[1] + bbox[3] - bbox[1] + 2)
+        draw.line((origin[0], y, origin[0] + bbox[2] - bbox[0], y),
+                  fill=(*color, round(255 * opacity)), width=max(1, stroke))
+    if cfg.get('custom_italic', False):
+        shear = 0.25
+        local = local.transform(
+            (local.width + int(local.height * shear), local.height),
+            Image.AFFINE,
+            (1, -shear, local.height * shear, 0, 1, 0),
+            resample=Image.BICUBIC,
+        )
+    x = int(float(cfg.get('custom_x', 0.5)) * width)
+    y = int(float(cfg.get('custom_y', 0.3)) * height)
+    paste_x = max(0, min(width - local.width, x - local.width // 2))
+    paste_y = max(0, min(height - local.height, y - padding))
+    layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+    layer.paste(local, (paste_x, paste_y), local)
+    return layer
+
+
 class LiveFrameRenderer:
     """generate_video()의 프레임 렌더링 로직을 재사용 가능하게 분리한 클래스.
 
@@ -1011,10 +1174,21 @@ class LiveFrameRenderer:
         self.height = height
         self.total_duration = total_duration
 
-        self.config = (
+        logical_config = (
             merge_visual_config(config_dict)
             if config_dict is not None
             else load_visual_config(visual_config_path)
+        )
+        self.config = validate_effect_plan(
+            scale_visual_config(logical_config, width, height)
+        )
+        self.layout_scale = self.config.get('_layout_scale', 1.0)
+        timeline = self.config.get('timeline', {})
+        self.visibility_timeline_duration = float(
+            timeline.get('duration', total_duration) or total_duration
+        )
+        self.visibility_timeline_offset = float(
+            timeline.get('offset', 0.0) or 0.0
         )
         self.vcfg = self.config['visualizer']
         self.tcfg = self.config['text']
@@ -1030,21 +1204,27 @@ class LiveFrameRenderer:
             styled_family += " Italic"
         self.font_title = get_font(self.tcfg['font_size'], styled_family)
         self.font_sub = get_font(self.tcfg['sub_font_size'], styled_family)
-        self.font_time = get_font(22, text_font_family)
+        self.font_time = get_font(max(1, round(22 * self.layout_scale)), text_font_family)
 
         self.text_color = hex_to_rgb(self.tcfg['color'])
-        self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'])
-        self.viz_color = hex_to_rgb(self.vcfg['color'])
+        self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'], (0, 0, 0))
+        self.viz_color = hex_to_rgb(
+            self.vcfg['color'], (111, 140, 255)
+        )
         self.bar_color = hex_to_rgb(self.pcfg['color'])
-        self.bar_bg = hex_to_rgb(self.pcfg['background_color'])
+        self.bar_bg = hex_to_rgb(
+            self.pcfg['background_color'], (51, 51, 51)
+        )
 
         self.track_viz_max = [
             track_reference_max(a.stft_magnitudes) for a in analyses
         ]
 
         self.bg_cache = {
-            a.filename: prepare_background(width, height, self.config, a.key, a.mode)
-            for a in analyses
+            index: prepare_background(
+                width, height, self.config, a.key, a.mode
+            )
+            for index, a in enumerate(analyses)
         }
 
         self.track_boundaries = []
@@ -1071,18 +1251,27 @@ class LiveFrameRenderer:
                 })
 
         self.beat_time_cache = {}
-        for a in analyses:
+        for track_index, tb in enumerate(self.track_boundaries):
+            a = tb['analysis']
             if a.beat_times is not None and len(a.beat_times) > 0:
-                offsets = []
-                for tb in self.track_boundaries:
-                    if tb['analysis'].filename == a.filename:
-                        offset = tb['start']
-                        offsets = [(bt + offset) for bt in a.beat_times
-                                   if (bt + offset) >= tb['start'] and (bt + offset) < tb['end']]
-                        break
-                self.beat_time_cache[a.filename] = np.array(offsets)
+                source_start = float(tb.get('source_start', 0.0))
+                offsets = [
+                    float(bt) - source_start + float(tb['start'])
+                    for bt in a.beat_times
+                    if float(bt) >= source_start
+                    and float(bt) - source_start + float(tb['start'])
+                    < float(tb['end'])
+                ]
+                self.beat_time_cache[track_index] = np.array(offsets)
             else:
-                self.beat_time_cache[a.filename] = np.array([])
+                self.beat_time_cache[track_index] = np.array([])
+        logger.info(
+            "Beat timeline prepared: %s",
+            ", ".join(
+                f"track {index + 1}={len(beats)}"
+                for index, beats in self.beat_time_cache.items()
+            ),
+        )
 
         self.smooth_cache = {}
         self._smooth_times = {}
@@ -1109,7 +1298,11 @@ class LiveFrameRenderer:
             self._load_clips()
         self._static_cache = {}
         self._bg_only_cache = {}
+        self._foreground_cache = {}
         self._build_static_layers()
+        self._custom_text_layer = build_custom_text_layer(
+            self.width, self.height, self.tcfg, self.layout_scale
+        )
 
 
     def _load_clips(self):
@@ -1148,7 +1341,18 @@ class LiveFrameRenderer:
 
     def reconfigure(self, config_dict):
         """오디오 믹싱/트랙 경계는 그대로 두고 시각 설정만 다시 적용한다."""
-        self.config = merge_visual_config(config_dict)
+        self.config = validate_effect_plan(
+            scale_visual_config(config_dict, self.width, self.height)
+        )
+        self.layout_scale = self.config.get('_layout_scale', 1.0)
+        timeline = self.config.get('timeline', {})
+        self.visibility_timeline_duration = float(
+            timeline.get('duration', self.total_duration)
+            or self.total_duration
+        )
+        self.visibility_timeline_offset = float(
+            timeline.get('offset', 0.0) or 0.0
+        )
         self.vcfg = self.config['visualizer']
         self.tcfg = self.config['text']
         self.pcfg = self.config['progress_bar']
@@ -1163,17 +1367,23 @@ class LiveFrameRenderer:
             styled_family += " Italic"
         self.font_title = get_font(self.tcfg['font_size'], styled_family)
         self.font_sub = get_font(self.tcfg['sub_font_size'], styled_family)
-        self.font_time = get_font(22, text_font_family)
+        self.font_time = get_font(max(1, round(22 * self.layout_scale)), text_font_family)
 
         self.text_color = hex_to_rgb(self.tcfg['color'])
-        self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'])
-        self.viz_color = hex_to_rgb(self.vcfg['color'])
+        self.shadow_c = hex_to_rgb(self.tcfg['shadow_color'], (0, 0, 0))
+        self.viz_color = hex_to_rgb(
+            self.vcfg['color'], (111, 140, 255)
+        )
         self.bar_color = hex_to_rgb(self.pcfg['color'])
-        self.bar_bg = hex_to_rgb(self.pcfg['background_color'])
+        self.bar_bg = hex_to_rgb(
+            self.pcfg['background_color'], (51, 51, 51)
+        )
 
         self.bg_cache = {
-            a.filename: prepare_background(self.width, self.height, self.config, a.key, a.mode)
-            for a in self.analyses
+            index: prepare_background(
+                self.width, self.height, self.config, a.key, a.mode
+            )
+            for index, a in enumerate(self.analyses)
         }
         self.smooth_cache = {}
         self._smooth_times = {}
@@ -1201,7 +1411,11 @@ class LiveFrameRenderer:
 
         self._static_cache = {}
         self._bg_only_cache = {}
+        self._foreground_cache = {}
         self._build_static_layers()
+        self._custom_text_layer = build_custom_text_layer(
+            self.width, self.height, self.tcfg, self.layout_scale
+        )
 
     def _build_static_layers(self):
         """트랙당 배경+텍스트 오버레이를 한 번만 렌더링해서 캐싱.
@@ -1211,19 +1425,29 @@ class LiveFrameRenderer:
         font_title, font_sub = self.font_title, self.font_sub
         text_color, shadow_c = self.text_color, self.shadow_c
 
-        for tb in self.track_boundaries:
+        for track_index, tb in enumerate(self.track_boundaries):
             a = tb['analysis']
-            if a.filename in self._static_cache:
-                if a.filename not in self._bg_only_cache:
-                    bg_only = self.bg_cache[a.filename].copy()
-                    self._bg_only_cache[a.filename] = np.array(bg_only.convert('RGB'))
+            if track_index in self._static_cache:
+                if track_index not in self._bg_only_cache:
+                    bg_only = self.bg_cache[track_index].copy()
+                    self._bg_only_cache[track_index] = np.array(bg_only.convert('RGB'))
                 continue
 
-            bg = self.bg_cache[a.filename].copy()
+            bg = self.bg_cache[track_index].copy()
+            foreground = Image.new('RGBA', (width, height), (0, 0, 0, 0))
             overlays = self.config.get('overlays', {})
-            paste_image_overlay(bg, overlays.get('album', {}))
-            paste_image_overlay(bg, overlays.get('logo', {}))
-            draw = ImageDraw.Draw(bg)
+            overlay_order = [
+                effect_id for effect_id in self.config.get(
+                    'effect_order', ['album', 'logo']
+                )
+                if effect_id in ('album', 'logo')
+            ]
+            for effect_id in ('album', 'logo'):
+                if effect_id not in overlay_order:
+                    overlay_order.append(effect_id)
+            for effect_id in overlay_order:
+                paste_image_overlay(foreground, overlays.get(effect_id, {}))
+            draw = ImageDraw.Draw(foreground)
             text_x = int(float(tcfg.get('x', 0.5)) * width)
             text_align = tcfg.get('align', 'center')
 
@@ -1235,9 +1459,9 @@ class LiveFrameRenderer:
                 return x - text_width // 2
 
             if tcfg['position'] == 'center':
-                base_y = int(float(tcfg.get('y', 0.5)) * height) - 60
+                base_y = int(float(tcfg.get('y', 0.5)) * height) - round(60 * self.layout_scale)
             else:
-                base_y = 80
+                base_y = round(80 * self.layout_scale)
 
             if tcfg['show_title']:
                 title = os.path.splitext(a.filename)[0] if tcfg.get('strip_extension', True) else a.filename
@@ -1256,7 +1480,7 @@ class LiveFrameRenderer:
                         fill=(*text_color, 255), width=2,
                     )
 
-            info_y = base_y + 65
+            info_y = base_y + round(65 * self.layout_scale)
             info_parts = []
             if tcfg['show_bpm']:
                 info_parts.append(f"{a.bpm:.0f} BPM")
@@ -1281,67 +1505,13 @@ class LiveFrameRenderer:
                         fill=(*text_color, 200), width=1,
                     )
 
-            custom_text = tcfg.get('custom_text', '')
-            if custom_text:
-                custom_font_size = tcfg.get('custom_font_size', 36)
-                custom_bold = tcfg.get('custom_bold', False)
-                custom_italic = tcfg.get('custom_italic', False)
-                custom_font = get_font(
-                    custom_font_size, tcfg.get('custom_font_family')
-                )
-                custom_color = hex_to_rgb(tcfg.get('custom_color', '#ffffff'))
-                cx_pos = int(tcfg.get('custom_x', 0.5) * width)
-                cy_pos = int(tcfg.get('custom_y', 0.3) * height)
+            composed = bg.convert('RGBA')
+            composed.alpha_composite(foreground)
+            self._foreground_cache[track_index] = foreground
+            self._static_cache[track_index] = np.array(composed.convert('RGB'))
 
-                pad = 20 + (4 if custom_bold else 0)
-                bbox0 = draw.textbbox((0, 0), custom_text, font=custom_font)
-                layer_w = (bbox0[2] - bbox0[0]) + pad * 2
-                layer_h = (bbox0[3] - bbox0[1]) + pad * 2
-                text_layer = Image.new('RGBA', (layer_w, layer_h), (0, 0, 0, 0))
-                tdraw = ImageDraw.Draw(text_layer)
-                origin = (pad - bbox0[0], pad - bbox0[1])
-
-                if tcfg['shadow']:
-                    soff = tcfg['shadow_offset']
-                    shadow_pos = (origin[0] + soff, origin[1] + soff)
-                    if custom_bold:
-                        for dx in range(-1, 2):
-                            for dy in range(-1, 2):
-                                tdraw.text((shadow_pos[0]+dx, shadow_pos[1]+dy), custom_text,
-                                          fill=(*shadow_c, 150), font=custom_font)
-                    else:
-                        tdraw.text(shadow_pos, custom_text, fill=(*shadow_c, 150), font=custom_font)
-
-                if custom_bold:
-                    for dx in range(-1, 2):
-                        for dy in range(-1, 2):
-                            tdraw.text((origin[0]+dx, origin[1]+dy), custom_text,
-                                      fill=(*custom_color, 255), font=custom_font)
-                else:
-                    tdraw.text(origin, custom_text, fill=(*custom_color, 255), font=custom_font)
-
-                if tcfg.get('custom_underline', False):
-                    ux0, uy1 = origin[0], origin[1] + (bbox0[3] - bbox0[1]) + 2
-                    ux1 = origin[0] + (bbox0[2] - bbox0[0])
-                    tdraw.line([(ux0, uy1), (ux1, uy1)], fill=(*custom_color, 255), width=2)
-
-                if custom_italic:
-                    shear = 0.25
-                    new_w = layer_w + int(layer_h * shear)
-                    text_layer = text_layer.transform(
-                        (new_w, layer_h), Image.AFFINE,
-                        (1, -shear, layer_h * shear, 0, 1, 0),
-                        resample=Image.BICUBIC,
-                    )
-
-                paste_x = cx_pos - text_layer.width // 2
-                paste_y = cy_pos - pad
-                bg.paste(text_layer, (paste_x, paste_y), text_layer)
-
-            self._static_cache[a.filename] = np.array(bg.convert('RGB'))
-
-            bg_only = self.bg_cache[a.filename].copy()
-            self._bg_only_cache[a.filename] = np.array(bg_only.convert('RGB'))
+            bg_only = self.bg_cache[track_index].copy()
+            self._bg_only_cache[track_index] = np.array(bg_only.convert('RGB'))
 
     def track_at(self, t):
         idx = 0
@@ -1374,7 +1544,8 @@ class LiveFrameRenderer:
         progress = np.clip(progress, 0, 1)
 
         _render_visuals = should_render_visuals(
-            t, total_duration,
+            t + self.visibility_timeline_offset,
+            self.visibility_timeline_duration,
             initial_visible_duration=self.initial_visible,
             ending_visible_duration=self.ending_visible,
             visibility_enabled=self.visibility_enabled,
@@ -1382,14 +1553,47 @@ class LiveFrameRenderer:
         )
 
         if _render_visuals:
-            frame = Image.fromarray(self._static_cache[a.filename].copy())
+            frame = Image.fromarray(
+                self._static_cache[current_track_idx].copy()
+            )
+            if current_track_idx + 1 < len(self.track_boundaries):
+                next_tb = self.track_boundaries[current_track_idx + 1]
+                overlap_start = float(next_tb['start'])
+                overlap_end = float(tb['end'])
+                if overlap_start <= t < overlap_end:
+                    span = max(0.001, overlap_end - overlap_start)
+                    alpha = float(np.clip(
+                        (t - overlap_start) / span, 0.0, 1.0
+                    ))
+                    next_frame = Image.fromarray(
+                        self._static_cache[current_track_idx + 1].copy()
+                    )
+                    frame = Image.blend(frame, next_frame, alpha)
         else:
             frame = Image.new('RGB', (width, height), self.visibility_black)
 
         if _render_visuals and self._clip_enabled:
             clip_frame = self._get_clip_frame(t)
             if clip_frame is not None:
-                frame.paste(clip_frame, (0, 0))
+                frame = clip_frame.convert('RGBA')
+                foreground = self._foreground_cache[current_track_idx]
+                if current_track_idx + 1 < len(self.track_boundaries):
+                    next_tb = self.track_boundaries[current_track_idx + 1]
+                    overlap_start = float(next_tb['start'])
+                    overlap_end = float(tb['end'])
+                    if overlap_start <= t < overlap_end:
+                        alpha = float(np.clip(
+                            (t - overlap_start)
+                            / max(0.001, overlap_end - overlap_start),
+                            0.0, 1.0,
+                        ))
+                        foreground = Image.blend(
+                            foreground,
+                            self._foreground_cache[current_track_idx + 1],
+                            alpha,
+                        )
+                frame.alpha_composite(foreground)
+                frame = frame.convert('RGB')
 
         if not _render_visuals:
             frame_arr = np.array(frame.convert('RGB'))
@@ -1397,6 +1601,32 @@ class LiveFrameRenderer:
                                    fcfg['fade_in_duration'], fcfg['fade_out_duration'],
                                    total_duration)
             return frame_arr
+
+        custom_start = max(0.0, float(
+            tcfg.get('custom_start_seconds', 0.0) or 0.0
+        ))
+        custom_end = max(0.0, float(
+            tcfg.get('custom_end_seconds', 0.0) or 0.0
+        ))
+        custom_target = max(0, int(
+            tcfg.get('custom_target_track', 0) or 0
+        ))
+        custom_visible = (
+            bool(tcfg.get('custom_text'))
+            and t >= custom_start
+            and (custom_end <= 0 or t < custom_end)
+            and (custom_target == 0 or custom_target == current_track_idx + 1)
+        )
+        custom_layer = (
+            self._custom_text_layer
+            if custom_visible else None
+        )
+        if custom_layer is not None and tcfg.get(
+            'custom_affects_by_effects', True
+        ):
+            frame = frame.convert('RGBA')
+            frame.alpha_composite(custom_layer)
+            frame = frame.convert('RGB')
 
         # --- Visualizer ---
         if vcfg['type'] != 'none' and a.stft_magnitudes.size > 0:
@@ -1590,11 +1820,12 @@ class LiveFrameRenderer:
             else:
                 by = margin
 
-            draw.rectangle([(40, by), (width - 40, by + bar_h)],
+            side_inset = max(1, round(40 * self.layout_scale))
+            draw.rectangle([(side_inset, by), (width - side_inset, by + bar_h)],
                            fill=(*bar_bg, 180))
-            pw = int((width - 80) * progress)
+            pw = int((width - side_inset * 2) * progress)
             if pw > 0:
-                draw.rectangle([(40, by), (40 + pw, by + bar_h)],
+                draw.rectangle([(side_inset, by), (side_inset + pw, by + bar_h)],
                                fill=(*bar_color, 230))
 
         # --- Time display ---
@@ -1608,12 +1839,12 @@ class LiveFrameRenderer:
             bbox = draw.textbbox((0, 0), time_text, font=font_time)
             tw = bbox[2] - bbox[0]
             if pcfg['position'] == 'bottom':
-                ty = height - margin - bar_h - 28
+                ty = height - margin - bar_h - round(28 * self.layout_scale)
             else:
-                ty = margin + bar_h + 8
+                ty = margin + bar_h + round(8 * self.layout_scale)
             draw_text_with_shadow(draw, ((width - tw) // 2, ty), time_text,
                                   font_time, (*text_color, 180), tcfg['shadow'],
-                                  (*shadow_c, 100), 2)
+                                  (*shadow_c, 100), max(1, round(2 * self.layout_scale)))
 
         frame_arr = np.array(frame.convert('RGB'))
 
@@ -1621,11 +1852,18 @@ class LiveFrameRenderer:
                                fcfg['fade_out_duration'], total_duration)
 
         if effects_active:
-            beats = beat_time_cache.get(a.filename, np.array([]))
+            beats = beat_time_cache.get(tb['index'], np.array([]))
             frame_arr = apply_beat_effects(frame_arr, t, beats, ecfg, width, height)
 
         if self.crt_active:
             frame_arr = apply_crt_effect(frame_arr, ecfg, width, height)
+
+        if custom_layer is not None and not tcfg.get(
+            'custom_affects_by_effects', True
+        ):
+            frame = Image.fromarray(frame_arr).convert('RGBA')
+            frame.alpha_composite(custom_layer)
+            frame_arr = np.array(frame.convert('RGB'))
 
         return frame_arr
 
@@ -1638,8 +1876,15 @@ def generate_video(analyses, mixed_audio_path, output_path,
                    timestamps=None, timestamp_duration=8.0, crossfade_duration=4.0,
                    frame_progress_callback=None, fps=24,
                    video_codec='auto', audio_codec='aac',
-                   video_bitrate='5000k', audio_bitrate='320k'):
-    print(t("video.renderStarting"), end="", flush=True)
+                   video_bitrate='5000k', audio_bitrate='320k',
+                   process_callback=None, cancel_event=None,
+                   log_callback=None):
+    message = t("video.renderStarting")
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(
+        message.encode(encoding, errors="replace").decode(encoding),
+        end="", flush=True,
+    )
 
     if not os.path.isfile(mixed_audio_path):
         raise FileNotFoundError(t("video.mixedAudioNotFound", path=mixed_audio_path))
@@ -1719,11 +1964,21 @@ def generate_video(analyses, mixed_audio_path, output_path,
             '-c:a', audio_codec, '-b:a', str(audio_bitrate), '-shortest',
             '-movflags', '+faststart', temp_output,
         ]
+        if log_callback:
+            log_callback(
+                "encoder command: "
+                + subprocess.list2cmdline([os.fspath(arg) for arg in command])
+            )
         process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             creationflags=_NO_WINDOW,
         )
+        logger.info(
+            "Video encoder started pid=%s output=%s", process.pid, output_path
+        )
+        if process_callback:
+            process_callback(process.pid)
         stderr_chunks = []
         stderr_lock = threading.Lock()
         def _drain_stderr():
@@ -1734,6 +1989,8 @@ def generate_video(analyses, mixed_audio_path, output_path,
         stderr_thread.start()
         try:
             for frame_index in range(_total_frames):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RenderCancelledError(t("render.cancelled"))
                 frame = active_renderer.render_frame(frame_index / fps)
                 process.stdin.write(np.ascontiguousarray(frame, dtype=np.uint8).tobytes())
                 if frame_progress_callback:

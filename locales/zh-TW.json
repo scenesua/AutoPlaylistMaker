@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "每個控制項混合一種氛圍類型；自動選擇庫檔案。"
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "common": {
     "save": "儲存",
     "cancel": "取消",
@@ -60,7 +112,19 @@
     "restoringUi": "還原專案資料與介面狀態",
     "projectFailed": "無法載入專案。\n\n{error}",
     "waveformCount": "準備波形 {current}/{total} ({percent}%)",
-    "sliderResetHint": "Alt+點擊：還原預設值"
+    "sliderResetHint": "Alt+點擊：還原預設值",
+    "analysisStage": {
+      "beats": "檢測節拍和起始點",
+      "cache": "準備分析緩存",
+      "complete": "文件分析完成",
+      "decoding": "解碼音訊",
+      "frequency": "準備頻率數據",
+      "loudness": "分析響度和能量",
+      "metadata": "讀取音訊元數據",
+      "waveform": "生成波形和電平數據",
+      "tools": "準備分析模組和音訊工具"
+    },
+    "preparingTools": "準備音訊分析工具"
   },
   "navigation": {
     "stage0": "1/6 專案 + 匯入",
@@ -78,7 +142,9 @@
     "unsavedTitle": "未儲存的變更",
     "unsavedBody": "您有未儲存的變更。是否不儲存就離開？",
     "projectLabel": "專案：{name}",
-    "autoSaveFailed": "自動儲存失敗：{error}"
+    "autoSaveFailed": "自動儲存失敗：{error}",
+    "exitFullscreen": "退出全螢幕",
+    "fullscreen": "全螢幕"
   },
   "project": {
     "title": "專案",
@@ -421,7 +487,22 @@
     "runDistributionFirst": "首先運行分發",
     "stop": "停止",
     "textFont": "文字字體：",
-    "trackRange": "{total} 的軌道 {start} - {end}"
+    "trackRange": "{total} 的軌道 {start} - {end}",
+    "actualPreviewResolution": "實際預覽：{width} × {height}",
+    "crossfadeDuration": "交叉淡入淡出（秒）",
+    "previewAudio": "正在準備預覽音訊...",
+    "previewConnecting": "正在連接預覽播放器...",
+    "previewEffects": "準備場景和效果...",
+    "previewQualityAuto": "預覽：自動",
+    "previewQualityCustom": "預覽：自訂",
+    "previewQualityHigh": "預覽：高",
+    "previewQualityLow": "預覽：低",
+    "previewQualityMedium": "預覽：中",
+    "previewRangeOne": "1 首曲目：當前曲目",
+    "previewRangeTwo": "2 首曲目：當前 + 下一首",
+    "previewReadyDetail": "{range}·{width}·{height}·{duration:.1f}·s",
+    "previewTimeline": "正在計算預覽時間軸...",
+    "sceneTransition": "場景轉換"
   },
   "render": {
     "title": "渲染",
@@ -506,7 +587,9 @@
     "renderErrors": "{errors} 渲染失敗。\n已完成的輸出：{path}",
     "res1080": "全高清 1080p",
     "res4k": "超高清4K",
-    "res720": "高清720p"
+    "res720": "高清720p",
+    "noAnalyzedTracks": "失敗：未分析音軌",
+    "outputVerified": "渲染完成並且輸出通過驗證。\n\n輸出檔：{path}\n實際長度：{duration}\n實際解析度：{width} × {height}\n檔案大小：{size}"
   },
   "time": {
     "hours": "{count}小時",
@@ -543,8 +626,30 @@
     "categoryOther": "其他",
     "audioResponse": "音訊響應",
     "style": "外觀及風格",
-    "transform": "位置及尺寸"
+    "transform": "位置及尺寸",
+    "openRack": "開啟效果機架",
+    "rackTitle": "效果機架",
+    "fixedOrderHint": "移動按鈕僅適用於同一合成階段；其他階段依實際算圖順序固定。",
+    "settings": "設定",
+    "missingFile": "找不到檔案",
+    "summary": "啟用 {active}/{total} · 警告 {warnings}",
+    "stageBackground": "1 · 背景",
+    "stageOverlay": "2 · 影像疊加",
+    "stageText": "3 · 文字",
+    "stageVisualizer": "4 · 視覺化器",
+    "stageFade": "5 · 淡入淡出",
+    "stageBeat": "6 · 節拍效果",
+    "stagePost": "7 · 後製處理",
+    "stageVisibility": "8 · 顯示控制",
+    "ambienceMixer": "環境",
+    "categoryAudioEffects": "音訊效果",
+    "stageAudio": "音訊總線",
+    "defaultEffects": "預設效果",
+    "stageGlobalAudio": "音樂大師總線",
+    "stageTransition": "場景轉換"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "title": "全域音訊",
     "musicMaster": "音樂主音量 (dB)",

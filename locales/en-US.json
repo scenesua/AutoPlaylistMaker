@@ -1,4 +1,7 @@
 {
+  "ambientUi": {"ambientLibrary":"Ambience library","sourceManager":"Source manager","previewSource":"Preview source","addUserFiles":"Add user sources","rescanLibrary":"Rescan library","density":"Density","variation":"Variation","startTime":"Start time","endTime":"End time","fadeIn":"Fade in","fadeOut":"Fade out","mute":"Mute","solo":"Solo","sourceCount":"{count} sources","userSource":"User source","categorySources":"Continuous {continuous} · Events {events} · Hybrid {hybrid}","libraryCurrent":"The library is up to date.","organizingLibrary":"Organizing ambience library","extractingArchives":"Extracting archives","checkingAudio":"Checking audio files","classifyingAudio":"Classifying ambience","registeringLibrary":"Registering library","libraryOrganized":"Ambience library organized.","processingFailed":"Processing failed","mixerHint":"Each control mixes one ambience type; library files are selected automatically."},
+  "ambientCategory": {"rain":"Rain","thunder":"Thunder","wind":"Wind","ocean":"Ocean","stream":"Stream","fire":"Fire","forest":"Forest","birds":"Birds","crickets":"Crickets","cafe":"Cafe","city":"City","train":"Train","fan":"Fan","ventilation":"Ventilation","water":"Other water","miscellaneous":"Miscellaneous","unclassified":"Unclassified"},
+  "ambientGroup": {"nature":"Nature","indoor":"Indoor & life","urban":"Urban & transit","other":"Other"},
   "common": {
     "save": "Save",
     "cancel": "Cancel",
@@ -52,6 +55,18 @@
     "cancelling": "Cancelling after the current file…",
     "cancelled": "The task was cancelled.",
     "checkingFiles": "Checking files",
+    "preparingTools": "Preparing audio analysis tools",
+    "analysisStage": {
+      "tools": "Preparing analysis modules and audio tools",
+      "decoding": "Decoding audio",
+      "metadata": "Reading audio metadata",
+      "waveform": "Generating waveform and level data",
+      "beats": "Detecting beats and onsets",
+      "loudness": "Analyzing loudness and energy",
+      "frequency": "Preparing frequency data",
+      "cache": "Preparing analysis cache",
+      "complete": "File analysis complete"
+    },
     "analyzingAudio": "Analyzing audio and generating waveform data",
     "cacheReady": "Analysis cache ready",
     "partialFailure": "{count} file(s) could not be analyzed.\n\n{detail}",
@@ -74,6 +89,8 @@
     "save": "Save",
     "themeLight": "\u2600",
     "themeDark": "\u263e",
+    "fullscreen": "Full screen",
+    "exitFullscreen": "Exit full screen",
     "unsaved": " \u00b7 Unsaved changes",
     "unsavedTitle": "Unsaved changes",
     "unsavedBody": "You have unsaved changes. Exit without saving?",
@@ -416,7 +433,22 @@
     "mixSelected": "Mix {idx} selected - press Refresh to preview",
     "configApplied": "Settings applied to Mix {mix}",
     "ready": "Mix {mix} preview ready ({duration:.1f}s)",
-    "trackRange": "Tracks {start}-{end} of {total}"
+    "trackRange": "Tracks {start}-{end} of {total}",
+    "sceneTransition": "Scene transition",
+    "crossfadeDuration": "Crossfade (seconds)",
+    "previewRangeOne": "1 track: current track",
+    "previewRangeTwo": "2 tracks: current + next",
+    "previewQualityAuto": "Preview: Auto",
+    "previewQualityLow": "Preview: Low",
+    "previewQualityMedium": "Preview: Medium",
+    "previewQualityHigh": "Preview: High",
+    "previewQualityCustom": "Preview: Custom",
+    "actualPreviewResolution": "Actual preview: {width}×{height}",
+    "previewReadyDetail": "{range} · {width}×{height} · {duration:.1f}s",
+    "previewTimeline": "Calculating preview timeline...",
+    "previewAudio": "Preparing preview audio...",
+    "previewEffects": "Preparing scenes and effects...",
+    "previewConnecting": "Connecting preview player..."
   },
   "render": {
     "title": "Render",
@@ -471,6 +503,7 @@
     "cancelling": "Cancel requested...",
     "cancellingStatus": "Safely stopping current encoding...",
     "outputSaved": "Saved to {path}",
+    "outputVerified": "Rendering completed and the output passed validation.\n\nOutput file: {path}\nActual duration: {duration}\nActual resolution: {width}×{height}\nFile size: {size}",
     "saveFolder": "Select save folder",
     "keepCompleted": "Keeping completed",
     "noPrevious": "No previous render to retry.",
@@ -501,7 +534,8 @@
     "loopRepeatCount": "{count}x",
     "groupError": "Failed: {error}",
     "completedWithErrors": "Render finished with {count} error(s)",
-    "renderErrors": "{errors} render(s) failed.\nCompleted outputs: {path}"
+    "renderErrors": "{errors} render(s) failed.\nCompleted outputs: {path}",
+    "noAnalyzedTracks": "Failed: no analyzed audio tracks"
   },
   "time": {
     "hours": "{count}h",
@@ -521,8 +555,10 @@
     "autosave": "Auto-saved",
     "noChanges": "No changes"
   },
-  "effects": {"title":"Effects","add":"Add effect","empty":"No effects have been added yet.","remove":"Remove","collapseAll":"Collapse all","expandAll":"Expand all","alreadyAdded":"Already added","basic":"Basic settings","transform":"Position & size","style":"Appearance & style","audioResponse":"Audio response","categoryBasic":"Basic elements","categoryText":"Text & information","categoryAudio":"Audio reactive","categoryMotion":"Motion & transitions","categoryColor":"Color & light","categoryOther":"Other"},
+  "effects": {"title":"Effects","add":"Add effect","empty":"No user effects have been added yet.","defaultEffects":"Default effects","remove":"Remove","collapseAll":"Collapse all","expandAll":"Expand all","alreadyAdded":"Already added","basic":"Basic settings","transform":"Position & size","style":"Appearance & style","audioResponse":"Audio response","categoryBasic":"Basic elements","categoryText":"Text & information","categoryAudio":"Audio reactive","categoryAudioEffects":"Audio effects","categoryMotion":"Motion & transitions","categoryColor":"Color & light","categoryOther":"Other","ambienceMixer":"Ambience","openRack":"Open effect rack","rackTitle":"Effect Rack","fixedOrderHint":"Move buttons work only within the same composition stage; other stages follow the real render order.","settings":"Settings","missingFile":"File not found","summary":"Active {active}/{total} · Warnings {warnings}","stageGlobalAudio":"Music master bus","stageTransition":"Scene transition","stageBackground":"Base background","stageOverlay":"2 · Image overlays","stageText":"3 · Text","stageVisualizer":"4 · Visualizer","stageAudio":"Audio bus","stageFade":"5 · Fade","stageBeat":"6 · Beat effects","stagePost":"7 · Post-processing","stageVisibility":"8 · Visibility"},
   "globalAudio": {"title":"Global audio","music":"Music","normalization":"Loudness normalization","ambience":"Ambience","advanced":"Advanced audio","musicMaster":"Music master (dB)","normalizeTracks":"Normalize track loudness","targetLufs":"Target loudness (LUFS)","truePeak":"True Peak (dBTP)","maxGain":"Maximum auto gain (dB)","ambientMaster":"Ambience master (dB)","ambientTracks":"Ambience layers","addAmbient":"Add ambience files","layerEnabled":"Enable selected layer","itemVolume":"Layer volume (dB)","pan":"Pan","stereoWidth":"Stereo width","volumeMeter":"Volume meter","meterSource":"Meter source","finalMaster":"Final master","musicBus":"Music bus","ambientBus":"Ambience bus","analysisUnavailable":"Loudness analysis unavailable","gainLimited":"gain limited","noTracks":"No music tracks in this mix.","fileMissing":"File missing","masterMeter":"Master"},
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "errors": {
     "fileNotFound": "File not found: {path}",
     "noAudioFiles": "No audio files found.",

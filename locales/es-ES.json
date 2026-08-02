@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "Cada control mezcla un tipo de ambiente; Los archivos de la biblioteca se seleccionan automáticamente."
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "common": {
     "save": "Guardar",
     "cancel": "Cancelar",
@@ -60,7 +112,19 @@
     "restoringUi": "Restaurando proyecto e interfaz",
     "projectFailed": "No se pudo cargar el proyecto.\n\n{error}",
     "waveformCount": "Preparando ondas {current}/{total} ({percent}%)",
-    "sliderResetHint": "Alt+clic: restaurar valor predeterminado"
+    "sliderResetHint": "Alt+clic: restaurar valor predeterminado",
+    "analysisStage": {
+      "beats": "Detectar latidos y comienzos",
+      "cache": "Preparando caché de análisis",
+      "complete": "Análisis de archivos completo",
+      "decoding": "Decodificar audio",
+      "frequency": "Preparación de datos de frecuencia",
+      "loudness": "Analizando el volumen y la energía.",
+      "metadata": "Leer metadatos de audio",
+      "waveform": "Generación de datos de forma de onda y nivel",
+      "tools": "Preparando módulos de análisis y herramientas de audio."
+    },
+    "preparingTools": "Preparando herramientas de análisis de audio"
   },
   "navigation": {
     "stage0": "1/6 Proyecto + Importar",
@@ -78,7 +142,9 @@
     "unsavedTitle": "Cambios sin guardar",
     "unsavedBody": "Tienes cambios sin guardar. ¿Salir sin guardar?",
     "projectLabel": "Proyecto: {name}",
-    "autoSaveFailed": "Autoguardado fallido: {error}"
+    "autoSaveFailed": "Autoguardado fallido: {error}",
+    "exitFullscreen": "Salir de pantalla completa",
+    "fullscreen": "Pantalla completa"
   },
   "project": {
     "title": "Proyecto",
@@ -421,7 +487,22 @@
     "runDistributionFirst": "Ejecute la distribución primero",
     "stop": "Detener",
     "textFont": "Fuente de texto:",
-    "trackRange": "Pistas {start}–{end} de {total}"
+    "trackRange": "Pistas {start}–{end} de {total}",
+    "actualPreviewResolution": "Vista previa real: {width} × {height}",
+    "crossfadeDuration": "Fundido cruzado (segundos)",
+    "previewAudio": "Preparando audio de vista previa...",
+    "previewConnecting": "Conectando reproductor de vista previa...",
+    "previewEffects": "Preparando escenas y efectos...",
+    "previewQualityAuto": "Vista previa: automática",
+    "previewQualityCustom": "Vista previa: personalizada",
+    "previewQualityHigh": "Vista previa: alta",
+    "previewQualityLow": "Vista previa: baja",
+    "previewQualityMedium": "Vista previa: Mediana",
+    "previewRangeOne": "1 pista: pista actual",
+    "previewRangeTwo": "2 pistas: actual + siguiente",
+    "previewReadyDetail": "{range} · {width} × {height} · {duration:.1f} s",
+    "previewTimeline": "Calculando la línea de tiempo de vista previa...",
+    "sceneTransition": "Transición de escena"
   },
   "render": {
     "title": "Renderizar",
@@ -506,7 +587,9 @@
     "renderErrors": "Error en el procesamiento de {errors}.\nSalidas completadas: {path}",
     "res1080": "Full HD 1080p",
     "res4k": "Ultra HD 4K",
-    "res720": "alta definición 720p"
+    "res720": "alta definición 720p",
+    "noAnalyzedTracks": "Error: no hay pistas de audio analizadas",
+    "outputVerified": "La renderización se completó y la salida pasó la validación.\n\nArchivo de salida: {path} \nDuración real: {duration} \nResolución real: {width} × {height} \nTamaño de archivo: {size}"
   },
   "time": {
     "hours": "{count}h",
@@ -543,8 +626,30 @@
     "categoryOther": "Otros",
     "audioResponse": "Respuesta de audio",
     "style": "Apariencia y estilo",
-    "transform": "Posición y tamaño"
+    "transform": "Posición y tamaño",
+    "openRack": "Abrir rack de efectos",
+    "rackTitle": "Rack de efectos",
+    "fixedOrderHint": "Los botones de movimiento solo funcionan dentro de la misma etapa; las demás siguen el orden real de renderizado.",
+    "settings": "Ajustes",
+    "missingFile": "Archivo no encontrado",
+    "summary": "Activos {active}/{total} · Avisos {warnings}",
+    "stageBackground": "1 · Fondo",
+    "stageOverlay": "2 · Superposiciones",
+    "stageText": "3 · Texto",
+    "stageVisualizer": "4 · Visualizador",
+    "stageFade": "5 · Fundido",
+    "stageBeat": "6 · Efectos de ritmo",
+    "stagePost": "7 · Posprocesado",
+    "stageVisibility": "8 · Visibilidad",
+    "ambienceMixer": "Ambiente",
+    "categoryAudioEffects": "efectos de audio",
+    "stageAudio": "Autobús de audio",
+    "defaultEffects": "Efectos predeterminados",
+    "stageGlobalAudio": "Autobús maestro de música",
+    "stageTransition": "Transición de escena"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "title": "Audio global",
     "musicMaster": "Máster de música (dB)",

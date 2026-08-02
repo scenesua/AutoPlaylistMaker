@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "各コントロールは 1 つのアンビエンス タイプをミックスします。ライブラリファイルは自動的に選択されます。"
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "common": {
     "save": "保存",
     "cancel": "キャンセル",
@@ -60,7 +112,19 @@
     "restoringUi": "プロジェクトと画面状態を復元",
     "projectFailed": "プロジェクトを読み込めませんでした。\n\n{error}",
     "waveformCount": "波形準備 {current}/{total} ({percent}%)",
-    "sliderResetHint": "Alt+クリック：既定値に戻す"
+    "sliderResetHint": "Alt+クリック：既定値に戻す",
+    "analysisStage": {
+      "beats": "ビートとオンセットの検出",
+      "cache": "分析キャッシュの準備",
+      "complete": "ファイル解析が完了しました",
+      "decoding": "オーディオのデコード",
+      "frequency": "周波数データの準備",
+      "loudness": "ラウドネスとエネルギーの分析",
+      "metadata": "オーディオメタデータの読み取り",
+      "waveform": "波形データとレベルデータの生成",
+      "tools": "分析モジュールとオーディオツールの準備"
+    },
+    "preparingTools": "音声解析ツールの準備"
   },
   "navigation": {
     "stage0": "1/6 プロジェクト＋インポート",
@@ -78,7 +142,9 @@
     "unsavedTitle": "未保存の変更",
     "unsavedBody": "未保存の変更があります。保存せずに終了しますか？",
     "projectLabel": "プロジェクト：{name}",
-    "autoSaveFailed": "自動保存に失敗しました：{error}"
+    "autoSaveFailed": "自動保存に失敗しました：{error}",
+    "exitFullscreen": "全画面表示を終了する",
+    "fullscreen": "全画面表示"
   },
   "project": {
     "title": "プロジェクト",
@@ -421,7 +487,22 @@
     "runDistributionFirst": "最初に配布を実行する",
     "stop": "停止",
     "textFont": "テキストのフォント:",
-    "trackRange": "全{total}曲中 {start}～{end}曲目"
+    "trackRange": "全{total}曲中 {start}～{end}曲目",
+    "actualPreviewResolution": "実際のプレビュー：{width} × {height}",
+    "crossfadeDuration": "クロスフェード (秒)",
+    "previewAudio": "プレビュー音声を準備しています...",
+    "previewConnecting": "プレビュー プレーヤーを接続しています...",
+    "previewEffects": "シーンとエフェクトを準備しています...",
+    "previewQualityAuto": "プレビュー: 自動",
+    "previewQualityCustom": "プレビュー: カスタム",
+    "previewQualityHigh": "プレビュー: 高",
+    "previewQualityLow": "プレビュー: 低",
+    "previewQualityMedium": "プレビュー: 中",
+    "previewRangeOne": "1トラック：現在のトラック",
+    "previewRangeTwo": "2 トラック: 現在のトラックと次のトラック",
+    "previewReadyDetail": "{range}・{width} × {height}・{duration:.1f}",
+    "previewTimeline": "プレビュー タイムラインを計算しています...",
+    "sceneTransition": "シーン遷移"
   },
   "render": {
     "title": "レンダリング",
@@ -506,7 +587,9 @@
     "renderErrors": "{errors} のレンダリングに失敗しました。\n完成した出力: {path}",
     "res1080": "フルHD 1080p",
     "res4k": "ウルトラ HD 4K",
-    "res720": "HD 720p"
+    "res720": "HD 720p",
+    "noAnalyzedTracks": "失敗: 分析されたオーディオ トラックがありません",
+    "outputVerified": "レンダリングが完了し、出力が検証に合格しました。\n\n出力ファイル: {path} \n実際の継続時間: {duration} \n実際の解像度: {width} × {height} \nファイルサイズ: {size}"
   },
   "time": {
     "hours": "{count}時間",
@@ -543,8 +626,30 @@
     "categoryOther": "その他",
     "audioResponse": "音声応答",
     "style": "外観とスタイル",
-    "transform": "位置とサイズ"
+    "transform": "位置とサイズ",
+    "openRack": "エフェクトラックを開く",
+    "rackTitle": "エフェクトラック",
+    "fixedOrderHint": "移動ボタンは同じ合成段階内でのみ使用できます。その他は実際のレンダー順に固定されます。",
+    "settings": "設定",
+    "missingFile": "ファイルが見つかりません",
+    "summary": "有効 {active}/{total} · 警告 {warnings}",
+    "stageBackground": "1 · 背景",
+    "stageOverlay": "2 · 画像オーバーレイ",
+    "stageText": "3 · テキスト",
+    "stageVisualizer": "4 · ビジュアライザー",
+    "stageFade": "5 · フェード",
+    "stageBeat": "6 · ビートエフェクト",
+    "stagePost": "7 · ポスト処理",
+    "stageVisibility": "8 · 表示制御",
+    "ambienceMixer": "雰囲気",
+    "categoryAudioEffects": "オーディオエフェクト",
+    "stageAudio": "オーディオバス",
+    "defaultEffects": "デフォルトのエフェクト",
+    "stageGlobalAudio": "ミュージックマスターバス",
+    "stageTransition": "シーン遷移"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "title": "グローバルオーディオ",
     "musicMaster": "音楽マスター (dB)",

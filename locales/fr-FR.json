@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "Chaque commande mélange un type d'ambiance ; les fichiers de bibliothèque sont sélectionnés automatiquement."
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "common": {
     "save": "Enregistrer",
     "cancel": "Annuler",
@@ -60,7 +112,19 @@
     "restoringUi": "Restauration du projet et de l’interface",
     "projectFailed": "Impossible de charger le projet.\n\n{error}",
     "waveformCount": "Préparation des formes d’onde {current}/{total} ({percent}%)",
-    "sliderResetHint": "Alt+clic : rétablir la valeur par défaut"
+    "sliderResetHint": "Alt+clic : rétablir la valeur par défaut",
+    "analysisStage": {
+      "beats": "Détection des battements et des débuts",
+      "cache": "Préparation du cache d'analyse",
+      "complete": "Analyse du dossier terminée",
+      "decoding": "Décodage audio",
+      "frequency": "Préparation des données de fréquence",
+      "loudness": "Analyser le volume et l'énergie",
+      "metadata": "Lecture des métadonnées audio",
+      "waveform": "Génération de données de forme d'onde et de niveau",
+      "tools": "Préparation de modules d'analyse et d'outils audio"
+    },
+    "preparingTools": "Préparation des outils d'analyse audio"
   },
   "navigation": {
     "stage0": "1/6 Projet + Import",
@@ -78,7 +142,9 @@
     "unsavedTitle": "Modifications non enregistrées",
     "unsavedBody": "Vous avez des modifications non enregistrées. Quitter sans enregistrer ?",
     "projectLabel": "Projet : {name}",
-    "autoSaveFailed": "Échec de la sauvegarde automatique : {error}"
+    "autoSaveFailed": "Échec de la sauvegarde automatique : {error}",
+    "exitFullscreen": "Quitter le plein écran",
+    "fullscreen": "Plein écran"
   },
   "project": {
     "title": "Projet",
@@ -421,7 +487,22 @@
     "runDistributionFirst": "Exécutez d’abord la distribution",
     "stop": "Arrêt",
     "textFont": "Police du texte :",
-    "trackRange": "Pistes {start} à {end} sur {total}"
+    "trackRange": "Pistes {start} à {end} sur {total}",
+    "actualPreviewResolution": "Aperçu actuel : {width} × {height}",
+    "crossfadeDuration": "Fondu enchaîné (secondes)",
+    "previewAudio": "Préparation de l'aperçu audio...",
+    "previewConnecting": "Connexion du lecteur d'aperçu...",
+    "previewEffects": "Préparation des scènes et des effets...",
+    "previewQualityAuto": "Aperçu : Automatique",
+    "previewQualityCustom": "Aperçu : personnalisé",
+    "previewQualityHigh": "Aperçu : Élevé",
+    "previewQualityLow": "Aperçu : Faible",
+    "previewQualityMedium": "Aperçu : Moyen",
+    "previewRangeOne": "1 piste : piste actuelle",
+    "previewRangeTwo": "2 titres : actuel + suivant",
+    "previewReadyDetail": "{range} · {width} × {height} · {duration:.1f} s",
+    "previewTimeline": "Calcul de la chronologie de l'aperçu...",
+    "sceneTransition": "Transition de scène"
   },
   "render": {
     "title": "Rendu",
@@ -506,7 +587,9 @@
     "renderErrors": "Échec du ou des rendus {errors}.\nSorties terminées : {path}",
     "res1080": "Pleine HD 1080p",
     "res4k": "Ultra HD 4K",
-    "res720": "HD 720p"
+    "res720": "HD 720p",
+    "noAnalyzedTracks": "Échec : aucune piste audio analysée",
+    "outputVerified": "Rendu terminé et la sortie a passé la validation.\n\nFichier de sortie : {path} \nDurée réelle : {duration} \nRésolution réelle : {width} × {height} \nTaille du fichier : {size}"
   },
   "time": {
     "hours": "{count}h",
@@ -543,8 +626,30 @@
     "categoryOther": "Autres",
     "audioResponse": "Réponse audio",
     "style": "Apparence et style",
-    "transform": "Position et taille"
+    "transform": "Position et taille",
+    "openRack": "Ouvrir le rack d’effets",
+    "rackTitle": "Rack d’effets",
+    "fixedOrderHint": "Le déplacement fonctionne uniquement dans la même étape de composition ; les autres suivent l’ordre réel du rendu.",
+    "settings": "Réglages",
+    "missingFile": "Fichier introuvable",
+    "summary": "Actifs {active}/{total} · Alertes {warnings}",
+    "stageBackground": "1 · Arrière-plan",
+    "stageOverlay": "2 · Superpositions",
+    "stageText": "3 · Texte",
+    "stageVisualizer": "4 · Visualiseur",
+    "stageFade": "5 · Fondu",
+    "stageBeat": "6 · Effets rythmiques",
+    "stagePost": "7 · Post-traitement",
+    "stageVisibility": "8 · Visibilité",
+    "ambienceMixer": "Ambiance",
+    "categoryAudioEffects": "Effets audio",
+    "stageAudio": "Bus audio",
+    "defaultEffects": "Effets par défaut",
+    "stageGlobalAudio": "Bus maître de musique",
+    "stageTransition": "Transition de scène"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "title": "Audio global",
     "musicMaster": "Master musique (dB)",

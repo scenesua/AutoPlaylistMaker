@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "Jeder Regler mischt einen Ambiente-Typ; Bibliotheksdateien werden automatisch ausgewählt."
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "analyzer": {
     "analyzing": "Analysieren",
     "major": "Wesentlich",
@@ -266,7 +318,22 @@
     "y": "Y:",
     "yOffset": "Y-Versatz:",
     "zoom": "Zoom",
-    "zoomIntensity": "Intensität:"
+    "zoomIntensity": "Intensität:",
+    "actualPreviewResolution": "Aktuelle Vorschau: {width} × {height}",
+    "crossfadeDuration": "Überblendung (Sekunden)",
+    "previewAudio": "Vorschau-Audio wird vorbereitet...",
+    "previewConnecting": "Vorschau-Player wird angeschlossen...",
+    "previewEffects": "Szenen und Effekte vorbereiten...",
+    "previewQualityAuto": "Vorschau: Automatisch",
+    "previewQualityCustom": "Vorschau: Benutzerdefiniert",
+    "previewQualityHigh": "Vorschau: Hoch",
+    "previewQualityLow": "Vorschau: Niedrig",
+    "previewQualityMedium": "Vorschau: Mittel",
+    "previewRangeOne": "1 Titel: aktueller Titel",
+    "previewRangeTwo": "2 Titel: aktuell + nächster",
+    "previewReadyDetail": "{range} · {width} × {height} · {duration:.1f} s",
+    "previewTimeline": "Vorschauzeitleiste wird berechnet...",
+    "sceneTransition": "Szenenübergang"
   },
   "dist": {
     "allTracks": "Alle Spuren (in Gruppen ziehen)",
@@ -341,7 +408,27 @@
     "remove": "Entfernen",
     "style": "Aussehen und Stil",
     "title": "Effekte",
-    "transform": "Position und Größe"
+    "transform": "Position und Größe",
+    "openRack": "Effekt-Rack öffnen",
+    "rackTitle": "Effekt-Rack",
+    "fixedOrderHint": "Verschieben ist nur innerhalb derselben Kompositionsstufe möglich; andere Stufen folgen der echten Renderreihenfolge.",
+    "settings": "Einstellungen",
+    "missingFile": "Datei nicht gefunden",
+    "summary": "Aktiv {active}/{total} · Warnungen {warnings}",
+    "stageBackground": "1 · Hintergrund",
+    "stageOverlay": "2 · Bildüberlagerungen",
+    "stageText": "3 · Text",
+    "stageVisualizer": "4 · Visualizer",
+    "stageFade": "5 · Überblendung",
+    "stageBeat": "6 · Beat-Effekte",
+    "stagePost": "7 · Nachbearbeitung",
+    "stageVisibility": "8 · Sichtbarkeit",
+    "ambienceMixer": "Ambiente",
+    "categoryAudioEffects": "Audioeffekte",
+    "stageAudio": "Audiobus",
+    "defaultEffects": "Standardeffekte",
+    "stageGlobalAudio": "Musik-Master-Bus",
+    "stageTransition": "Szenenübergang"
   },
   "errors": {
     "analysisFailed": "Analyse fehlgeschlagen: {name} - {error}",
@@ -371,6 +458,8 @@
     "noResults": "Keine Ergebnisse gefunden",
     "preview": "Siehe ABC 123"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "addAmbient": "Ambientedateien hinzufügen",
     "advanced": "Erweitertes Audio",
@@ -454,7 +543,9 @@
     "themeLight": "☀",
     "unsaved": "· Nicht gespeicherte Änderungen",
     "unsavedBody": "Sie haben nicht gespeicherte Änderungen. Ohne Speichern beenden?",
-    "unsavedTitle": "Nicht gespeicherte Änderungen"
+    "unsavedTitle": "Nicht gespeicherte Änderungen",
+    "exitFullscreen": "Verlassen Sie den Vollbildmodus",
+    "fullscreen": "Vollbild"
   },
   "player": {
     "cancelledUser": "Der Benutzer hat den Audiovorgang abgebrochen.",
@@ -478,7 +569,19 @@
     "restoringUi": "Projektdaten und Schnittstellenstatus wiederherstellen",
     "sliderResetHint": "Alt+Klick: Standard wiederherstellen",
     "waveformCount": "Vorbereiten der Wellenformen {current} / {total} ( {percent} %)",
-    "working": "Arbeiten…"
+    "working": "Arbeiten…",
+    "analysisStage": {
+      "beats": "Erkennen von Schlägen und Einsetzen",
+      "cache": "Analyse-Cache wird vorbereitet",
+      "complete": "Dateianalyse abgeschlossen",
+      "decoding": "Audio dekodieren",
+      "frequency": "Häufigkeitsdaten vorbereiten",
+      "loudness": "Analyse von Lautstärke und Energie",
+      "metadata": "Audio-Metadaten lesen",
+      "waveform": "Generieren von Wellenform- und Pegeldaten",
+      "tools": "Vorbereiten von Analysemodulen und Audiotools"
+    },
+    "preparingTools": "Vorbereiten von Audioanalysetools"
   },
   "project": {
     "addMusicFirst": "Fügen Sie zuerst Musikdateien hinzu",
@@ -639,7 +742,9 @@
     "title": "Rendern",
     "videoBitrate": "Videobitrate:",
     "videoCodec": "Videocodec:",
-    "waiting": "Warten"
+    "waiting": "Warten",
+    "noAnalyzedTracks": "Fehlgeschlagen: Keine analysierten Audiospuren",
+    "outputVerified": "Das Rendern ist abgeschlossen und die Ausgabe hat die Validierung bestanden.\n\nAusgabedatei: {path} \nTatsächliche Dauer: {duration} \nTatsächliche Auflösung: {width} × {height} \nDateigröße: {size}"
   },
   "splash": {
     "complete": "Vollständig!",

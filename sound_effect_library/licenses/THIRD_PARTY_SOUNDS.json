@@ -1,0 +1,750 @@
+{
+  "schema_version": 1,
+  "status": "user_confirmed",
+  "assets": [
+    {
+      "asset_id": "rain_continuous_001",
+      "original_filename": "1.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_002",
+      "original_filename": "2.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_003",
+      "original_filename": "3.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_004",
+      "original_filename": "4.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_005",
+      "original_filename": "1.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_006",
+      "original_filename": "2.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_007",
+      "original_filename": "3.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_008",
+      "original_filename": "4.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_event_001",
+      "original_filename": "alarm_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_event_002",
+      "original_filename": "alarm_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_event_003",
+      "original_filename": "alarm_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_001",
+      "original_filename": "ambient_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_002",
+      "original_filename": "ambient_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_003",
+      "original_filename": "ambient_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_004",
+      "original_filename": "machine_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_005",
+      "original_filename": "machine_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_006",
+      "original_filename": "machine_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_007",
+      "original_filename": "machine_04.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_008",
+      "original_filename": "machine_05.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_009",
+      "original_filename": "machine_06.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_010",
+      "original_filename": "machine_07.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_011",
+      "original_filename": "machine_08.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_012",
+      "original_filename": "machine_09.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_013",
+      "original_filename": "machine_10.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_014",
+      "original_filename": "machine_11.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_015",
+      "original_filename": "noise_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_016",
+      "original_filename": "noise_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_017",
+      "original_filename": "noise_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_018",
+      "original_filename": "pump_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_019",
+      "original_filename": "pump_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_continuous_009",
+      "original_filename": "rain.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_020",
+      "original_filename": "rolling.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_021",
+      "original_filename": "saw.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_001",
+      "original_filename": "water_boiling.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "stream_continuous_001",
+      "original_filename": "water_flowing.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_022",
+      "original_filename": "weird_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_023",
+      "original_filename": "weird_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "unclassified_hybrid_024",
+      "original_filename": "weird_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_002",
+      "original_filename": "bubble_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_003",
+      "original_filename": "bubble_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_004",
+      "original_filename": "bubble_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_005",
+      "original_filename": "loop_bubbles_1.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_006",
+      "original_filename": "loop_bubbles_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "rain_event_001",
+      "original_filename": "loop_rain.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_007",
+      "original_filename": "loop_water_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_008",
+      "original_filename": "loop_water_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_009",
+      "original_filename": "loop_water_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_010",
+      "original_filename": "slime_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_011",
+      "original_filename": "slime_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_012",
+      "original_filename": "slime_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_013",
+      "original_filename": "slime_04.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_014",
+      "original_filename": "slime_05.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_015",
+      "original_filename": "slime_06.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_016",
+      "original_filename": "slime_07.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_017",
+      "original_filename": "slime_08.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_018",
+      "original_filename": "slime_09.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_019",
+      "original_filename": "slime_10.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_020",
+      "original_filename": "slime_11.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_021",
+      "original_filename": "slime_13.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_022",
+      "original_filename": "slime_14.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_023",
+      "original_filename": "slime_15.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_024",
+      "original_filename": "slime_16.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_025",
+      "original_filename": "splash_01.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_026",
+      "original_filename": "splash_02.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_027",
+      "original_filename": "splash_03.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_028",
+      "original_filename": "splash_04.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_029",
+      "original_filename": "splash_05.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_030",
+      "original_filename": "splash_06.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_031",
+      "original_filename": "splash_07.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_032",
+      "original_filename": "splash_08.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_033",
+      "original_filename": "splash_09.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_034",
+      "original_filename": "splash_10.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_035",
+      "original_filename": "splash_11.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_036",
+      "original_filename": "splash_12.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_037",
+      "original_filename": "splash_13.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_038",
+      "original_filename": "splash_14.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "water_event_039",
+      "original_filename": "splash_15.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "creator": "rubberduck",
+      "source_page": "https://opengameart.org/content/40-cc0-water-splash-slime-sfx",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "thunder_event_001",
+      "original_filename": "237727__flathill__various-thunder-sounds.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "wind_continuous_001",
+      "original_filename": "662575__alppdcjr12__wind-in-trees-1.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "fan_continuous_001",
+      "original_filename": "171552__georgedyer__01-brown-noise.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "fan_continuous_002",
+      "original_filename": "249314__jarredgibb__pink-noise-20dbfs-30-second.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "fan_continuous_003",
+      "original_filename": "249313__jarredgibb__white-noise-20dbfs-30-second.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "ventilation_continuous_001",
+      "original_filename": "650743__lartti__static-noise-from-room-fan-air-conditioner-electricity-etc.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "ventilation_continuous_002",
+      "original_filename": "836534__autobot8299__ventilation-ambience.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "fan_continuous_004",
+      "original_filename": "546174__rvgerxini__air-fan-loop.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "train_continuous_001",
+      "original_filename": "440616__florianreichelt__train-ambience-sound-while-driving.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "city_continuous_001",
+      "original_filename": "451731__florianreichelt__city-ambience-with-distant-church-bells.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "cafe_continuous_001",
+      "original_filename": "680688__wesleywestmusic__very-busy-coffee-shop-ambience.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "cafe_continuous_002",
+      "original_filename": "453074__c_rogers__370973__waweee__coffee-shop-ambience_remastered.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "crickets_hybrid_001",
+      "original_filename": "crickets_1.mp3",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "birds_continuous_001",
+      "original_filename": "826310__sadiquecat__20250906_20h25-gergueil-bird.flac",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "birds_hybrid_001",
+      "original_filename": "Birds_and_Wind_-_Ambient_1.ogg",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "fire_continuous_001",
+      "original_filename": "fire.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "stream_continuous_002",
+      "original_filename": "515294__breviceps__stream-of-water.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    },
+    {
+      "asset_id": "ocean_continuous_001",
+      "original_filename": "534915__lucas_schacht__ocean-waves-06.wav",
+      "license_status": "user_confirmed",
+      "license": "CC0-1.0",
+      "attribution_required": false
+    }
+  ],
+  "license_basis": "Project owner confirmed on 2026-08-02 that all bundled original assets are CC0."
+}

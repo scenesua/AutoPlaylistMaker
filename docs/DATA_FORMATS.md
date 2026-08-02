@@ -131,9 +131,10 @@ projects/[project name]/
 - `render.output_dir`은 마지막 출력 폴더다.
 - panel 접힘·scroll 위치는 현재 별도 저장하지 않는다.
 - `design.active_effects`와 Stage 4의 `active_effect_ids`는 추가된 효과 카드의 안정적 ID 목록이다. 이 필드가 없는 구형 프로젝트는 기존 효과 전체를 활성 상태로 마이그레이션한다.
-- `design.global_audio`는 음악 master gain, 정규화/target/True Peak, 환경음 master gain과 환경음 레이어 목록을 저장한다.
-- 환경음 레이어는 `filepath`, `enabled`, `volume_db`, `pan`, `width`를 포함하며 프로젝트 안으로 백업된 상대 경로를 사용할 수 있다.
-- page plain state는 capture 시 deep copy하여 환경음 레이어나 효과 목록의 이후 변경이 저장 스냅샷을 오염시키지 않는다.
+- `design.global_audio`는 음악 master gain, 정규화 target과 True Peak만 저장하며 환경음 상태를 포함하지 않는다.
+- `design.ambience_mixer`는 `effect_id=ambience_mixer`, 단일 `instance_id`, 전체 `enabled`, 종류별 `sources.{category_id}.{enabled,volume_db}`와 `random_seed`를 저장한다. 실제 라이브러리 파일 ID와 경로는 프로젝트 UI 상태에 노출하지 않는다.
+- `sound_effect_library/manifests/sound_library.json`은 각 자산의 상대 경로, SHA-256, PCM fingerprint, 카테고리, 재생 유형, 길이, loudness/peak/silence, license 상태를 저장한다.
+- page plain state는 capture 시 deep copy하여 환경음 종류 상태나 효과 목록의 이후 변경이 저장 스냅샷을 오염시키지 않는다.
 
 ## 분석 캐시
 
@@ -184,3 +185,8 @@ projects/[project name]/
 - 누락 미디어는 `missing_paths()`로 수집하고 `relink_missing()`으로 basename 재검색한다.
 - 분석 NPZ 읽기 실패는 로그를 남기고 빈 분석 배열을 사용한다.
 - 저장 실패 시 temp 파일을 지우고 원본 `project.json`을 유지한다.
+## Render Space layout (1.3.1)
+
+시각 설정의 pixel 값은 `layout.version=2`, `reference_width=1920`, `reference_height=1080` 기준이다. 미리보기와 최종 렌더러가 대상 해상도에 맞게 한 번만 변환하며 Preview Viewport 좌표는 저장하지 않는다. 기존 format v4 프로젝트에 layout이 없으면 1920x1080 기준으로 해석한다.
+
+가공 환경음은 `sound_effect_library/manifests/processed_loops.json`에 상대 경로, 원본 경로, loop point, crossfade, duration, sample rate, channels, SHA-256, source project, processing version, license 상태를 저장한다. 절대 경로는 저장하지 않는다.

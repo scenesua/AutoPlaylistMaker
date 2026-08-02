@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "Ogni controllo mescola un tipo di ambiente; i file della libreria vengono selezionati automaticamente."
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "common": {
     "save": "Salva",
     "cancel": "Annulla",
@@ -60,7 +112,19 @@
     "restoringUi": "Ripristino progetto e interfaccia",
     "projectFailed": "Impossibile caricare il progetto.\n\n{error}",
     "waveformCount": "Preparazione forme d’onda {current}/{total} ({percent}%)",
-    "sliderResetHint": "Alt+clic: ripristina il valore predefinito"
+    "sliderResetHint": "Alt+clic: ripristina il valore predefinito",
+    "analysisStage": {
+      "beats": "Rilevazione di battiti e attacchi",
+      "cache": "Preparazione della cache di analisi",
+      "complete": "Analisi del file completata",
+      "decoding": "Decodifica dell'audio",
+      "frequency": "Preparazione dei dati di frequenza",
+      "loudness": "Analisi del volume e dell'energia",
+      "metadata": "Lettura dei metadati audio",
+      "waveform": "Generazione di dati sulla forma d'onda e sul livello",
+      "tools": "Preparazione di moduli di analisi e strumenti audio"
+    },
+    "preparingTools": "Preparazione degli strumenti di analisi audio"
   },
   "navigation": {
     "stage0": "1/6 Progetto + Importazione",
@@ -78,7 +142,9 @@
     "unsavedTitle": "Modifiche non salvate",
     "unsavedBody": "Sono presenti modifiche non salvate. Uscire senza salvare?",
     "projectLabel": "Progetto: {name}",
-    "autoSaveFailed": "Salvataggio automatico fallito: {error}"
+    "autoSaveFailed": "Salvataggio automatico fallito: {error}",
+    "exitFullscreen": "Esci dallo schermo intero",
+    "fullscreen": "A schermo intero"
   },
   "project": {
     "title": "Progetto",
@@ -421,7 +487,22 @@
     "runDistributionFirst": "Eseguire prima la distribuzione",
     "stop": "Fermare",
     "textFont": "Carattere del testo:",
-    "trackRange": "Tracce {start}–{end} di {total}"
+    "trackRange": "Tracce {start}–{end} di {total}",
+    "actualPreviewResolution": "Anteprima effettiva: {width} × {height}",
+    "crossfadeDuration": "Dissolvenza incrociata (secondi)",
+    "previewAudio": "Preparazione dell'audio di anteprima...",
+    "previewConnecting": "Collegamento del lettore di anteprima...",
+    "previewEffects": "Preparazione delle scene e degli effetti...",
+    "previewQualityAuto": "Anteprima: automatica",
+    "previewQualityCustom": "Anteprima: personalizzata",
+    "previewQualityHigh": "Anteprima: alta",
+    "previewQualityLow": "Anteprima: Basso",
+    "previewQualityMedium": "Anteprima: media",
+    "previewRangeOne": "1 traccia: traccia corrente",
+    "previewRangeTwo": "2 tracce: corrente + successiva",
+    "previewReadyDetail": "{range} · {width} × {height} · {duration:.1f} s",
+    "previewTimeline": "Calcolo della sequenza temporale dell'anteprima in corso...",
+    "sceneTransition": "Transizione di scena"
   },
   "render": {
     "title": "Rendering",
@@ -506,7 +587,9 @@
     "renderErrors": "Rendering {errors} non riusciti.\nUscite completate: {path}",
     "res1080": "FullHD1080p",
     "res4k": "Ultra HD 4K",
-    "res720": "HD720p"
+    "res720": "HD720p",
+    "noAnalyzedTracks": "Non riuscito: nessuna traccia audio analizzata",
+    "outputVerified": "Rendering completato e l'output ha superato la convalida.\n\nFile di output: {path} \nDurata effettiva: {duration} \nRisoluzione effettiva: {width} × {height} \nDimensione del file: {size}"
   },
   "time": {
     "hours": "{count}h",
@@ -543,8 +626,30 @@
     "categoryOther": "Altro",
     "audioResponse": "Risposta audio",
     "style": "Aspetto e stile",
-    "transform": "Posizione e dimensione"
+    "transform": "Posizione e dimensione",
+    "openRack": "Apri rack effetti",
+    "rackTitle": "Rack effetti",
+    "fixedOrderHint": "Lo spostamento funziona solo nella stessa fase di composizione; le altre seguono l’ordine reale di rendering.",
+    "settings": "Impostazioni",
+    "missingFile": "File non trovato",
+    "summary": "Attivi {active}/{total} · Avvisi {warnings}",
+    "stageBackground": "1 · Sfondo",
+    "stageOverlay": "2 · Sovrapposizioni",
+    "stageText": "3 · Testo",
+    "stageVisualizer": "4 · Visualizzatore",
+    "stageFade": "5 · Dissolvenza",
+    "stageBeat": "6 · Effetti beat",
+    "stagePost": "7 · Post-produzione",
+    "stageVisibility": "8 · Visibilità",
+    "ambienceMixer": "Ambiente",
+    "categoryAudioEffects": "Effetti audio",
+    "stageAudio": "Autobus audio",
+    "defaultEffects": "Effetti predefiniti",
+    "stageGlobalAudio": "Autobus maestro della musica",
+    "stageTransition": "Transizione di scena"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "title": "Audio globale",
     "musicMaster": "Master musica (dB)",

@@ -1,4 +1,56 @@
 {
+  "ambientUi": {
+    "ambientLibrary": "Ambience library",
+    "sourceManager": "Source manager",
+    "previewSource": "Preview source",
+    "addUserFiles": "Add user sources",
+    "rescanLibrary": "Rescan library",
+    "density": "Density",
+    "variation": "Variation",
+    "startTime": "Start time",
+    "endTime": "End time",
+    "fadeIn": "Fade in",
+    "fadeOut": "Fade out",
+    "mute": "Mute",
+    "solo": "Solo",
+    "sourceCount": "{count} sources",
+    "userSource": "User source",
+    "categorySources": "Continuous {continuous} · Events {events} · Hybrid {hybrid}",
+    "libraryCurrent": "The library is up to date.",
+    "organizingLibrary": "Organizing ambience library",
+    "extractingArchives": "Extracting archives",
+    "checkingAudio": "Checking audio files",
+    "classifyingAudio": "Classifying ambience",
+    "registeringLibrary": "Registering library",
+    "libraryOrganized": "Ambience library organized.",
+    "processingFailed": "Processing failed",
+    "mixerHint": "Каждый элемент управления смешивает один тип атмосферы; файлы библиотеки выбираются автоматически."
+  },
+  "ambientCategory": {
+    "rain": "Rain",
+    "thunder": "Thunder",
+    "wind": "Wind",
+    "ocean": "Ocean",
+    "stream": "Stream",
+    "fire": "Fire",
+    "forest": "Forest",
+    "birds": "Birds",
+    "crickets": "Crickets",
+    "cafe": "Cafe",
+    "city": "City",
+    "train": "Train",
+    "fan": "Fan",
+    "ventilation": "Ventilation",
+    "water": "Other water",
+    "miscellaneous": "Miscellaneous",
+    "unclassified": "Unclassified"
+  },
+  "ambientGroup": {
+    "nature": "Nature",
+    "indoor": "Indoor & life",
+    "urban": "Urban & transit",
+    "other": "Other"
+  },
   "analyzer": {
     "analyzing": "Анализируя",
     "major": "Главный",
@@ -266,7 +318,22 @@
     "y": "Ю:",
     "yOffset": "Смещение по оси Y:",
     "zoom": "Увеличить",
-    "zoomIntensity": "Интенсивность:"
+    "zoomIntensity": "Интенсивность:",
+    "actualPreviewResolution": "Фактический предварительный просмотр: {width} × {height}",
+    "crossfadeDuration": "Кроссфейд (секунды)",
+    "previewAudio": "Подготовка аудио для предварительного просмотра...",
+    "previewConnecting": "Подключение проигрывателя предварительного просмотра...",
+    "previewEffects": "Подготовка сцен и эффектов...",
+    "previewQualityAuto": "Предварительный просмотр: Авто",
+    "previewQualityCustom": "Предварительный просмотр: Пользовательский",
+    "previewQualityHigh": "Предварительный просмотр: Высокий",
+    "previewQualityLow": "Предварительный просмотр: Низкий",
+    "previewQualityMedium": "Предварительный просмотр: Средний",
+    "previewRangeOne": "1 трек: текущий трек",
+    "previewRangeTwo": "2 трека: текущий + следующий",
+    "previewReadyDetail": "{range} · {width} × {height} · {duration:.1f} s",
+    "previewTimeline": "Расчет графика предварительного просмотра...",
+    "sceneTransition": "Переход сцены"
   },
   "dist": {
     "allTracks": "Все треки (перетащите в группы)",
@@ -341,7 +408,27 @@
     "remove": "Удалять",
     "style": "Внешний вид и стиль",
     "title": "Эффекты",
-    "transform": "Положение и размер"
+    "transform": "Положение и размер",
+    "openRack": "Открыть стойку эффектов",
+    "rackTitle": "Стойка эффектов",
+    "fixedOrderHint": "Перемещение доступно только внутри одного этапа композиции; остальные следуют реальному порядку рендера.",
+    "settings": "Настройки",
+    "missingFile": "Файл не найден",
+    "summary": "Активно {active}/{total} · Предупреждения {warnings}",
+    "stageBackground": "1 · Фон",
+    "stageOverlay": "2 · Наложения",
+    "stageText": "3 · Текст",
+    "stageVisualizer": "4 · Визуализатор",
+    "stageFade": "5 · Затухание",
+    "stageBeat": "6 · Бит-эффекты",
+    "stagePost": "7 · Постобработка",
+    "stageVisibility": "8 · Видимость",
+    "ambienceMixer": "Атмосфера",
+    "categoryAudioEffects": "Аудио эффекты",
+    "stageAudio": "Аудио шина",
+    "defaultEffects": "Эффекты по умолчанию",
+    "stageGlobalAudio": "Музыкальный мастер-автобус",
+    "stageTransition": "Переход сцены"
   },
   "errors": {
     "analysisFailed": "Анализ не выполнен: {name} – {error}.",
@@ -371,6 +458,8 @@
     "noResults": "Результаты не найдены",
     "preview": "가나다 ABC 123"
   },
+  "textEffect": {"opacity":"Opacity","outlineWidth":"Outline width","outlineColor":"Outline color","backgroundEnabled":"Background box","backgroundColor":"Background color","backgroundOpacity":"Background opacity","backgroundPadding":"Background padding","startSeconds":"Start (seconds)","endSeconds":"End (seconds, 0 = full)","targetTrack":"Target track (0 = all)"},
+  "renderFailure": {"title":"Render failed","job":"Job","stage":"Stage","log":"Log","openLog":"Open log","openFolder":"Open folder","copyDetails":"Copy details"},
   "globalAudio": {
     "addAmbient": "Добавить файлы окружения",
     "advanced": "Расширенный звук",
@@ -454,7 +543,9 @@
     "themeLight": "☀",
     "unsaved": "· Несохраненные изменения",
     "unsavedBody": "У вас есть несохраненные изменения. Выйти без сохранения?",
-    "unsavedTitle": "Несохраненные изменения"
+    "unsavedTitle": "Несохраненные изменения",
+    "exitFullscreen": "Выйти из полноэкранного режима",
+    "fullscreen": "Полноэкранный"
   },
   "player": {
     "cancelledUser": "Пользователь отменил операцию аудио.",
@@ -478,7 +569,19 @@
     "restoringUi": "Восстановление данных проекта и состояния интерфейса",
     "sliderResetHint": "Alt+клик: восстановить настройки по умолчанию",
     "waveformCount": "Подготовка сигналов {current} / {total} ( {percent} %)",
-    "working": "Работающий…"
+    "working": "Работающий…",
+    "analysisStage": {
+      "beats": "Обнаружение ударов и приступов",
+      "cache": "Подготовка кэша анализа",
+      "complete": "Анализ файла завершен",
+      "decoding": "Декодирование аудио",
+      "frequency": "Подготовка данных о частоте",
+      "loudness": "Анализ громкости и энергии",
+      "metadata": "Чтение метаданных аудио",
+      "waveform": "Генерация сигналов и данных об уровне",
+      "tools": "Подготовка модулей анализа и аудиоинструментов"
+    },
+    "preparingTools": "Подготовка инструментов аудиоанализа"
   },
   "project": {
     "addMusicFirst": "Сначала добавьте музыкальные файлы",
@@ -639,7 +742,9 @@
     "title": "Рендеринг",
     "videoBitrate": "Битрейт видео:",
     "videoCodec": "Видеокодек:",
-    "waiting": "Ожидающий"
+    "waiting": "Ожидающий",
+    "noAnalyzedTracks": "Ошибка: нет проанализированных аудиодорожек.",
+    "outputVerified": "Рендеринг завершен, выходные данные прошли проверку.\n\nВыходной файл: {path} \nФактическая продолжительность: {duration} \nФактическое разрешение: {width} × {height}. \nРазмер файла: {size}"
   },
   "splash": {
     "complete": "Полный!",

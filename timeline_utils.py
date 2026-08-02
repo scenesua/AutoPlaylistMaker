@@ -130,15 +130,13 @@ def compute_two_track_window(selected_track_index, track_boundaries, repeat_plan
 
 
 def estimate_group_duration(analyses, crossfade=4.0):
-    if not analyses:
-        return 0.0
-    total = 0.0
-    for i, a in enumerate(analyses):
-        elapsed = total
-        fade = min(crossfade, elapsed / 3 if i > 0 else 0,
-                   getattr(a, 'duration', 0) / 3)
-        total += getattr(a, 'duration', 0) - fade
-    return total
+    from repeat_settings import estimate_group_duration as estimate
+    return estimate(
+        {"tracks": [
+            {"analysis": analysis} for analysis in (analyses or [])
+        ]},
+        crossfade_duration=crossfade,
+    )
 
 
 def build_track_boundaries(analyses, timestamps=None, crossfade=4.0):

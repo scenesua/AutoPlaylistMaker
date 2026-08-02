@@ -31,6 +31,24 @@ class AudioPreviewPlayer:
 
         def run():
             try:
+                direct_wav = (
+                    os.name == 'nt'
+                    and filepath.lower().endswith('.wav')
+                    and start <= 0
+                    and duration is None
+                    and volume == 1.0
+                    and fade_in <= 0
+                    and fade_out <= 0
+                )
+                if direct_wav:
+                    import winsound
+                    winsound.PlaySound(
+                        filepath,
+                        winsound.SND_FILENAME | winsound.SND_ASYNC,
+                    )
+                    if generation == self._generation and on_ready:
+                        on_ready()
+                    return
                 ffmpeg = self._ffmpeg_finder()
                 if not ffmpeg:
                     raise RuntimeError(t("player.ffmpegNotFound"))

@@ -6,7 +6,6 @@ import shutil
 import re
 import hashlib
 import tempfile
-import numpy as np
 from datetime import datetime
 from i18n import t, choice_id
 
@@ -35,8 +34,13 @@ def _safe_cache_name(filepath):
     return f"{safe_base}_{h}"
 
 
+def _numpy():
+    import numpy
+    return numpy
+
+
 def _arr(x):
-    return x if x is not None else np.array([])
+    return x if x is not None else _numpy().array([])
 
 
 def _source_signature(filepath):
@@ -110,14 +114,33 @@ class Project:
     def create(self, name=None):
         if not name:
             name = datetime.now().strftime("mix_%Y%m%d_%H%M%S")
+        raw_name = str(name)
+        name = raw_name.strip()
+        if (
+            not name
+            or name != raw_name
+            or name in {".", ".."}
+            or os.path.basename(name) != name
+            or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
+            or name.endswith((" ", "."))
+            or name.split(".", 1)[0].upper() in {
+                "CON", "PRN", "AUX", "NUL",
+                *(f"COM{i}" for i in range(1, 10)),
+                *(f"LPT{i}" for i in range(1, 10)),
+            }
+        ):
+            raise ValueError("Invalid project name")
         self.name = name
         self.created = datetime.now().isoformat()
         self.project_dir = os.path.join(self.base_dir, name)
         self.project_file = os.path.join(self.project_dir, "project.json")
+        if os.path.exists(self.project_dir):
+            raise FileExistsError(self.project_dir)
 
         for sub in ["audio", "images", "video", "drafts"]:
             os.makedirs(os.path.join(self.project_dir, sub), exist_ok=True)
 
+        self.save()
         return self.project_dir
 
     def backup_files(self, filepaths):
@@ -226,6 +249,7 @@ class Project:
         }
 
         if analyses:
+            np = _numpy()
             cache_dir = os.path.join(self.project_dir, "analysis_cache")
             os.makedirs(cache_dir, exist_ok=True)
             items = [(fp, a) for fp, a in analyses.items() if a is not None]
@@ -411,6 +435,37 @@ class Project:
                 track['filepath'] = path
             for clip in group.get('clips', []):
                 clip['filepath'] = self._resolve_path(clip.get('filepath', ''))
+
+        # Recover projects whose group media survived but top-level files did
+        # not. The group is sufficient to rebuild the file list and analysis.
+        known_files = {
+            os.path.normcase(os.path.abspath(item.get('original', '')))
+            for item in self.all_files if item.get('original')
+        }
+        for group in self.video_groups:
+            media = [
+                (track.get('filepath', ''), 'audio')
+                for track in group.get('tracks', [])
+            ]
+            for clip in group.get('clips', []):
+                path = clip.get('filepath', '')
+                extension = os.path.splitext(path)[1].lower()
+                if extension not in IMAGE_EXTS | VIDEO_EXTS:
+                    continue
+                media.append((
+                    path,
+                    'image' if extension in IMAGE_EXTS else 'video',
+                ))
+            for path, media_type in media:
+                if not path:
+                    continue
+                key = os.path.normcase(os.path.abspath(path))
+                if key in known_files:
+                    continue
+                self.all_files.append({
+                    'original': path, 'backup': '', 'type': media_type,
+                })
+                known_files.add(key)
         for old_path, resolved in path_aliases.items():
             analysis = self.track_analyses.get(old_path)
             if analysis and resolved:
@@ -458,6 +513,7 @@ class Project:
 
     def get_analysis_for(self, filepath):
         from analyzer import TrackAnalysis
+        np = _numpy()
         norm = os.path.abspath(filepath) if filepath else filepath
         ad = self.track_analyses.get(norm) or self.track_analyses.get(filepath)
         if not ad:

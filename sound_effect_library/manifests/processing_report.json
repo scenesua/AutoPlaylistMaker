@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "started_at": 1785416811.152447,
+  "completed_at": 1785416890.9950137,
+  "source_file_count": 22,
+  "source_bytes": 207134547,
+  "archives_found": 4,
+  "archives": {
+    "Rain_MP3.zip": {
+      "entries": 4,
+      "valid_audio": 4
+    },
+    "Rain_OGG.zip": {
+      "entries": 4,
+      "valid_audio": 4
+    },
+    "sfx_loops.zip": {
+      "entries": 30,
+      "valid_audio": 30
+    },
+    "water-splash-slime-sfx.zip": {
+      "entries": 40,
+      "valid_audio": 39
+    }
+  },
+  "audio_candidates": 96,
+  "valid_audio": 95,
+  "registered_assets": 95,
+  "failures": [
+    {
+      "path": "slime_12.ogg",
+      "archive": "water-splash-slime-sfx.zip",
+      "kind": "audio",
+      "reason": "audio is too short for the formal library; preserved for review",
+      "preserved_path": "unclassified/rejected/water-splash-slime-sfx_slime_12.ogg"
+    }
+  ],
+  "deleted_archives": [
+    "Rain_MP3.zip",
+    "Rain_OGG.zip",
+    "sfx_loops.zip",
+    "water-splash-slime-sfx.zip"
+  ]
+}

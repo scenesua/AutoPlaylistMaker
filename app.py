@@ -1,5 +1,5 @@
 """
-Auto Playlist Maker GUI v1.3.0 - Dark theme, D2Coding font, dark/light toggle
+Auto Playlist Maker GUI v1.3.1 - Dark theme, D2Coding font, dark/light toggle
 """
 
 import os
@@ -14,7 +14,7 @@ import subprocess
 import queue
 from logging.handlers import RotatingFileHandler
 
-_STARTUP_T0 = time.perf_counter()
+_STARTUP_T0 = float(os.environ.get("APM_BOOTSTRAP_T0", time.perf_counter()))
 
 import i18n as _i18n_mod
 t = _i18n_mod.t
@@ -37,6 +37,17 @@ logger = logging.getLogger(__name__)
 
 def _startup_mark(stage):
     logger.info("STARTUP %.3fs %s", time.perf_counter() - _STARTUP_T0, stage)
+    try:
+        with open(
+            os.path.join(_log_dir, "startup_timing.log"),
+            "a", encoding="utf-8",
+        ) as stream:
+            stream.write(
+                f"{datetime.datetime.now().isoformat()} "
+                f"{time.perf_counter() - _STARTUP_T0:.6f} {stage}\n"
+            )
+    except OSError:
+        logger.debug("Startup timing log unavailable", exc_info=True)
 
 _log_lock = threading.Lock()
 def _log_error(context, exc=None):
@@ -85,9 +96,6 @@ from tkinter import ttk, filedialog, messagebox
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from stage4_design_effects import Stage4DesignEffects
-from stage5_render import Stage5Render
-
 _loaded = False
 _analyze_track = None
 _load_audio_pydub = None
@@ -102,7 +110,7 @@ _PIL_ImageTk = None
 _PIL_ImageDraw = None
 _PIL_ImageFont = None
 video_gen = None
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 DONATION_URL = "https://toon.at/donate/scenesua"
 
 
@@ -185,6 +193,27 @@ def _ensure_distribution_modules():
         from distributor import distribute_tracks, get_distribution_summary
         _distribute_tracks = distribute_tracks
         _get_distribution_summary = get_distribution_summary
+
+
+def _create_design_stage(parent, app):
+    from stage4_design_effects import Stage4DesignEffects
+    return Stage4DesignEffects(parent, app)
+
+
+def _create_render_stage(parent, app):
+    from stage5_render import Stage5Render
+    return Stage5Render(parent, app)
+
+
+def _create_tk_root():
+    if '--safe' not in sys.argv:
+        try:
+            from tkinterdnd2 import TkinterDnD
+            return TkinterDnD.Tk()
+        except Exception:
+            pass
+    return tk.Tk()
+
 
 AUDIO_EXTS = {'.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.opus', '.aiff'}
 IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp', '.tiff'}
@@ -299,9 +328,21 @@ def file_type(path):
     return "unknown"
 
 
+def _refresh_group_duration(group):
+    from repeat_settings import estimate_group_duration
+    group["total_duration"] = estimate_group_duration(group)
+    return group["total_duration"]
+
+
 def _font(size, bold=False):
     weight = "bold" if bold else "normal"
     return (FONT_FAMILY, size, weight)
+
+
+def _default_projects_dir():
+    return os.path.join(
+        os.path.expanduser("~"), "Documents", "AutoPlaylistMaker"
+    )
 
 
 def _pil_font(size):
@@ -333,14 +374,22 @@ class TrackItem:
         self.missing = not os.path.isfile(filepath)
         self.status = "missing" if self.missing else "pending"
         self.analysis_error = ""
+        self._analysis_source_signature = None
 
-    def analyze(self):
+    def analyze(self, progress_callback=None):
         if self.filetype != "audio": return
         self.status = "analyzing"
         self.analysis_error = ""
         try:
+            if progress_callback:
+                progress_callback("tools", 0, 0)
             _ensure_analysis_modules()
-            self.analysis = _analyze_track(self.filepath)
+            if progress_callback:
+                progress_callback("tools", 1, 1)
+            self.analysis = _analyze_track(
+                self.filepath, progress_callback=progress_callback
+            )
+            self._analysis_source_signature = self._source_signature()
             self.duration = self.analysis.duration
             self.trim_end = self.duration
             self.status = "completed"
@@ -348,6 +397,19 @@ class TrackItem:
             self.status = "failed"
             self.analysis_error = str(e)
             print(t("errors.analysisFailed", name=self.filename, error=e))
+
+    def _source_signature(self):
+        try:
+            stat = os.stat(self.filepath)
+            return stat.st_size, stat.st_mtime_ns
+        except OSError:
+            return None
+
+    def has_current_analysis(self):
+        return (
+            self.analysis is not None
+            and self._analysis_source_signature == self._source_signature()
+        )
 
     def to_dict(self):
         return {
@@ -541,6 +603,7 @@ def styled_choice_menu(parent, value_variable, choices, **kw):
     menu._choice_display_variable = display_variable
     menu._choice_value_variable = value_variable
     menu._choice_labels = labels
+    value_variable._choice_values = choices
     return menu
 
 
@@ -579,6 +642,14 @@ def styled_scale(parent, variable, fr, to, res, **kw):
         return None
 
     scale.bind("<Button-1>", maybe_reset, add="+")
+    scale.bind("<Alt-Button-1>", reset_default)
+    # Tk's Windows Scale class treats buttons 2 and 3 as a jump-and-drag
+    # gesture.  Settings sliders intentionally use the primary button only.
+    for sequence in (
+        "<Button-2>", "<B2-Motion>", "<ButtonRelease-2>",
+        "<Button-3>", "<B3-Motion>", "<ButtonRelease-3>",
+    ):
+        scale.bind(sequence, lambda _event: "break")
     scale.bind("<Enter>", lambda _e: scale.configure(highlightbackground=THEME['accent']), add="+")
     scale.bind("<Leave>", lambda _e: scale.configure(highlightbackground=THEME['border']), add="+")
     _attach_tooltip(
@@ -660,7 +731,7 @@ def styled_text(parent, **kw):
 
 
 class TaskProgressOverlay:
-    """Shared modal progress card driven by real worker callbacks."""
+    """App-owned progress card driven only from the Tk thread."""
 
     def __init__(self, owner, title, cancellable=False, on_cancel=None):
         self.owner = owner
@@ -673,7 +744,7 @@ class TaskProgressOverlay:
             bg=THEME['bg_card'], highlightthickness=1,
             highlightbackground=THEME['border_strong'],
         )
-        self.window.geometry("460x224")
+        self.window.geometry("500x318")
         card = tk.Frame(self.window, bg=THEME['bg_card'], padx=24, pady=20)
         card.pack(fill=tk.BOTH, expand=True)
         styled_label(
@@ -696,6 +767,15 @@ class TaskProgressOverlay:
             orient=tk.HORIZONTAL, mode="determinate", maximum=100,
         )
         self.progress.pack(fill=tk.X)
+        self.file_stage_label = styled_label(
+            card, "", size=9, color=THEME['fg_dim'], bg=THEME['bg_card']
+        )
+        self.file_stage_label.pack(fill=tk.X, pady=(10, 3))
+        self.file_progress = ttk.Progressbar(
+            card, style="APM.Horizontal.TProgressbar",
+            orient=tk.HORIZONTAL, mode="determinate", maximum=100,
+        )
+        self.file_progress.pack(fill=tk.X)
         self.cancel_btn = styled_button(
             card, t("common.cancel"), self._cancel, "danger", padx=12
         )
@@ -704,16 +784,18 @@ class TaskProgressOverlay:
         self._root_bind = self.root.bind(
             "<Configure>", self._recenter, add="+"
         )
+        self._focus_bind = self.root.bind(
+            "<FocusIn>", self._restore, add="+"
+        )
         self.window.protocol("WM_DELETE_WINDOW", self._cancel)
         self._recenter()
         self.window.lift()
-        self.window.grab_set()
 
     def _recenter(self, _event=None):
         if not self.window.winfo_exists():
             return
         self.root.update_idletasks()
-        width, height = 460, 224
+        width, height = 500, 318
         x = self.root.winfo_rootx() + max(
             0, (self.root.winfo_width() - width) // 2
         )
@@ -722,12 +804,20 @@ class TaskProgressOverlay:
         )
         self.window.geometry(f"{width}x{height}+{x}+{y}")
 
+    def _restore(self, _event=None):
+        if not self.window.winfo_exists():
+            return
+        self.window.deiconify()
+        self._recenter()
+        self.window.lift()
+
     def update(self, stage, detail="", current=0, total=0):
         if not self.window.winfo_exists():
             return
         self.stage_label.configure(text=stage)
         self.detail_label.configure(text=detail)
         if total > 0:
+            self.progress.stop()
             percent = max(0, min(100, current / total * 100))
             self.count_label.configure(
                 text=t(
@@ -737,9 +827,24 @@ class TaskProgressOverlay:
             )
             self.progress.configure(mode="determinate", value=percent)
         else:
+            self.progress.stop()
             self.count_label.configure(text=t("progressOverlay.working"))
             self.progress.configure(mode="indeterminate")
             self.progress.start(12)
+
+    def update_file_stage(self, stage, current=0, total=0):
+        if not self.window.winfo_exists():
+            return
+        self.file_stage_label.configure(text=stage)
+        if total > 0:
+            self.file_progress.stop()
+            self.file_progress.configure(
+                mode="determinate",
+                value=max(0, min(100, current / total * 100)),
+            )
+        else:
+            self.file_progress.configure(mode="indeterminate")
+            self.file_progress.start(12)
 
     def _cancel(self):
         if self.on_cancel:
@@ -753,12 +858,11 @@ class TaskProgressOverlay:
         if not self.window.winfo_exists():
             return
         self.progress.stop()
-        try:
-            self.window.grab_release()
-        except tk.TclError:
-            pass
+        self.file_progress.stop()
         if self._root_bind:
             self.root.unbind("<Configure>", self._root_bind)
+        if self._focus_bind:
+            self.root.unbind("<FocusIn>", self._focus_bind)
         self.window.destroy()
 
 
@@ -784,6 +888,9 @@ class Stage0Project(tk.Frame):
         self.app = app
         self._lang_popup = None
         self._analysis_cancel_event = threading.Event()
+        self._analysis_thread = None
+        self._analysis_result = None
+        self._analysis_updates = queue.Queue()
         self._task_overlay = None
         self.build_ui()
 
@@ -1081,7 +1188,7 @@ class Stage0Project(tk.Frame):
         row_path = tk.Frame(proj_frame, bg=THEME['bg_card'])
         row_path.pack(fill=tk.X, pady=(6, 2))
         styled_label(row_path, t("project.pathLabel"), size=10, bg=THEME['bg_card']).pack(side=tk.LEFT)
-        self.proj_path_var = tk.StringVar(value=os.path.abspath(t("project.pathPlaceholder")))
+        self.proj_path_var = tk.StringVar(value=_default_projects_dir())
         styled_entry(row_path, textvariable=self.proj_path_var, width=40).pack(side=tk.LEFT, padx=6, fill=tk.X, expand=True)
         styled_button(row_path, t("common.browse"), self._pick_proj_path, padx=8).pack(side=tk.LEFT)
 
@@ -1230,6 +1337,8 @@ class Stage0Project(tk.Frame):
         self.status_label.configure(text="")
 
     def start_analysis(self):
+        if self._analysis_thread and self._analysis_thread.is_alive():
+            return
         audio = [
             track for track in self.app.tracks
             if track.filetype == "audio"
@@ -1251,42 +1360,125 @@ class Stage0Project(tk.Frame):
         set_button_state(
             self.analyze_btn, tk.DISABLED, text=t("project.analyzing")
         )
+        self.app._analysis_overlay = self._task_overlay
+        set_button_state(self.lang_btn, tk.DISABLED)
+        set_button_state(self.app.theme_btn, tk.DISABLED)
+        self._analysis_result = None
+        self._analysis_started_at = time.perf_counter()
+        self._analysis_timings = []
+        while not self._analysis_updates.empty():
+            self._analysis_updates.get_nowait()
 
         def run():
             failures = []
             completed = 0
-            for i, track in enumerate(audio):
-                if self._analysis_cancel_event.is_set():
-                    break
-                self.after(
-                    0,
-                    lambda tt=track, ii=i: self._update_analysis_progress(
-                        tt, ii, len(audio)
-                    ),
+            try:
+                for i, track in enumerate(audio):
+                    if self._analysis_cancel_event.is_set():
+                        break
+                    self._analysis_updates.put(
+                        ("progress", track, i, len(audio))
+                    )
+                    if (
+                        track.analysis is not None
+                        and (
+                            not hasattr(track, "has_current_analysis")
+                            or track.has_current_analysis()
+                        )
+                    ):
+                        completed += 1
+                        self._analysis_updates.put((
+                            "stage", track, i, len(audio),
+                            "cache", 1, 1,
+                        ))
+                        self._analysis_updates.put(
+                            ("item", track, completed, len(audio))
+                        )
+                        continue
+                    item_started_at = time.perf_counter()
+                    import inspect
+                    progress_callback = (
+                        lambda stage, current, total,
+                        item=track, index=i: self._analysis_updates.put((
+                            "stage", item, index, len(audio),
+                            stage, current, total,
+                        ))
+                    )
+                    if "progress_callback" in inspect.signature(
+                        track.analyze
+                    ).parameters:
+                        track.analyze(progress_callback=progress_callback)
+                    else:
+                        track.analyze()
+                    self._analysis_updates.put((
+                        "timing", f"file_{i + 1}",
+                        time.perf_counter() - item_started_at, 0,
+                    ))
+                    completed += 1
+                    if not track.analysis:
+                        failures.append(
+                            (track.filename, track.analysis_error)
+                        )
+                    self._analysis_updates.put(
+                        ("item", track, completed, len(audio))
+                    )
+            finally:
+                self._analysis_result = (
+                    self._analysis_cancel_event.is_set(), failures
                 )
-                track.analyze()
-                completed += 1
-                if not track.analysis:
-                    failures.append((track.filename, track.analysis_error))
-                self.after(
-                    0,
-                    lambda tt=track, done=completed: (
-                        self._update_tree(tt),
-                        self._task_overlay.update(
-                            t("progressOverlay.cacheReady"),
-                            tt.filename, done, len(audio),
-                        ) if self._task_overlay else None,
-                    ),
-                )
-            self.after(
-                0,
-                lambda: self._done(
-                    cancelled=self._analysis_cancel_event.is_set(),
-                    failures=failures,
-                ),
+
+        self._analysis_thread = threading.Thread(
+            target=run, daemon=True, name="track-analysis"
+        )
+        self._analysis_thread.start()
+        self.after(50, self._poll_analysis_finished)
+
+    def _finish_analysis_item(self, track, completed, total):
+        self._update_tree(track)
+        if self._task_overlay:
+            self._task_overlay.update(
+                t("progressOverlay.cacheReady"),
+                track.filename, completed, total,
             )
 
-        threading.Thread(target=run, daemon=True).start()
+    def _poll_analysis_finished(self):
+        while True:
+            try:
+                update = self._analysis_updates.get_nowait()
+            except queue.Empty:
+                break
+            kind = update[0]
+            if kind == "prepare":
+                if self._task_overlay:
+                    self._task_overlay.update(
+                        t(update[1]), current=update[2], total=update[3]
+                    )
+                continue
+            if kind == "timing":
+                self._analysis_timings.append((update[1], update[2]))
+                continue
+            if kind == "stage":
+                _, track, current, total, stage, step, step_total = update
+                self._update_analysis_progress(track, current, total)
+                if self._task_overlay:
+                    self._task_overlay.update_file_stage(
+                        t(f"progressOverlay.analysisStage.{stage}"),
+                        step, step_total,
+                    )
+                continue
+            _, track, current, total = update
+            if kind == "progress":
+                self._update_analysis_progress(track, current, total)
+            else:
+                self._finish_analysis_item(track, current, total)
+        thread = self._analysis_thread
+        if thread and thread.is_alive():
+            self.after(50, self._poll_analysis_finished)
+            return
+        cancelled, failures = self._analysis_result or (False, [])
+        self._analysis_thread = None
+        self._analysis_result = None
+        self._done(cancelled=cancelled, failures=failures)
 
     def _update_analysis_progress(self, track, index, total):
         self.status_label.configure(
@@ -1330,9 +1522,19 @@ class Stage0Project(tk.Frame):
         if self._task_overlay:
             self._task_overlay.close()
             self._task_overlay = None
+            self.app._analysis_overlay = None
+        elapsed = time.perf_counter() - getattr(
+            self, "_analysis_started_at", time.perf_counter()
+        )
+        logger.info(
+            "Analysis session finished in %.3fs; timings=%s",
+            elapsed, getattr(self, "_analysis_timings", []),
+        )
         set_button_state(
             self.analyze_btn, tk.NORMAL, text=t("project.analyze")
         )
+        set_button_state(self.lang_btn, tk.NORMAL)
+        set_button_state(self.app.theme_btn, tk.NORMAL)
         n = sum(1 for track in self.app.tracks if track.analysis)
         if cancelled:
             self.status_label.configure(
@@ -1379,9 +1581,19 @@ class Stage0Project(tk.Frame):
         if not name:
             messagebox.showwarning(t("common.warning"), t("project.enterName"))
             return
-        base = self.proj_path_var.get().strip() or os.path.abspath(t("project.pathPlaceholder"))
-        self.app.project = _Project(base_dir=base)
-        self.app.project.create(name)
+        base = self.proj_path_var.get().strip() or _default_projects_dir()
+        project = _Project(base_dir=base)
+        try:
+            project.create(name)
+        except (OSError, ValueError) as error:
+            messagebox.showerror(
+                t("common.error"),
+                t("project.saveError", error=error),
+                parent=self,
+            )
+            return
+        self.app.project = project
+        self.app.set_dirty(False)
         self.proj_status.configure(
             text=t(
                 "project.created",
@@ -1409,6 +1621,8 @@ class Stage0Project(tk.Frame):
                     for item in project.all_files
                     if item.get("type") == "audio"
                 ]
+                if audio_files:
+                    _ensure_analysis_modules()
                 analyses = {
                     os.path.abspath(track.get("filepath", "")):
                     track["analysis"]
@@ -1418,8 +1632,7 @@ class Stage0Project(tk.Frame):
                 }
                 audio_total = len(audio_files)
                 for index, filepath in enumerate(audio_files):
-                    self.after(
-                        0,
+                    self.app.post_ui(
                         lambda fp=filepath, i=index, total=audio_total:
                         overlay.update(
                             t("progressOverlay.restoringCache"),
@@ -1433,15 +1646,13 @@ class Stage0Project(tk.Frame):
                             analysis = _analyze_track(filepath)
                         if analysis:
                             analyses[key] = analysis
-                self.after(
-                    0,
+                self.app.post_ui(
                     lambda: self._finish_project_load(
                         project, data, analyses
                     ),
                 )
             except Exception as error:
-                self.after(
-                    0,
+                self.app.post_ui(
                     lambda detail=str(error): self._fail_project_load(detail),
                 )
 
@@ -1484,6 +1695,9 @@ class Stage0Project(tk.Frame):
                     a = analyses.get(os.path.abspath(track.filepath))
                     if a:
                         track.analysis = a
+                        track._analysis_source_signature = (
+                            track._source_signature()
+                        )
                         track.duration = a.duration
                         track.trim_end = a.duration
                         self._update_tree(track)
@@ -1494,7 +1708,9 @@ class Stage0Project(tk.Frame):
                 for track_info in vg.get('tracks', []):
                     if not track_info.get('analysis'):
                         fp = track_info.get('filepath', '')
-                        a = self.app.project.get_analysis_for(fp)
+                        a = analyses.get(os.path.abspath(fp))
+                        if not a:
+                            a = self.app.project.get_analysis_for(fp)
                         if a:
                             track_info['analysis'] = a
                             if not track_info.get('duration'):
@@ -1531,9 +1747,18 @@ class Stage0Project(tk.Frame):
                 from datetime import datetime
                 name = datetime.now().strftime("mix_%Y%m%d_%H%M%S")
                 self.proj_name_var.set(name)
-            base = self.proj_path_var.get().strip() or os.path.abspath(t("project.pathPlaceholder"))
-            self.app.project = _Project(base_dir=base)
-            self.app.project.create(name)
+            base = self.proj_path_var.get().strip() or _default_projects_dir()
+            project = _Project(base_dir=base)
+            try:
+                project.create(name)
+            except (OSError, ValueError) as error:
+                messagebox.showerror(
+                    t("common.error"),
+                    t("project.saveError", error=error),
+                    parent=self,
+                )
+                return
+            self.app.project = project
             self.proj_status.configure(text=t("project.created", name=name, path=self.app.project.project_dir))
 
         self.app.project.target_duration = self.get_target_seconds()
@@ -1578,7 +1803,14 @@ class Stage0Project(tk.Frame):
         self.proj_status.configure(text=t("project.saving"))
 
         def _on_progress(cur, total, msg):
-            self.after(0, lambda c=cur, tot=total, m=msg: self.proj_status.configure(text=t("project.saveProgress", msg=m, cur=c, total=tot)))
+            self.app.post_ui(
+                lambda c=cur, tot=total, m=msg:
+                self.proj_status.configure(
+                    text=t(
+                        "project.saveProgress", msg=m, cur=c, total=tot
+                    )
+                )
+            )
 
         def run():
             try:
@@ -1590,14 +1822,14 @@ class Stage0Project(tk.Frame):
                         app_state=app_state,
                         progress_callback=_on_progress,
                     )
-                self.after(0, lambda: (
+                self.app.post_ui(lambda: (
                     self.proj_status.configure(text=t("project.saved")),
                     self.save_btn.configure(state=tk.NORMAL),
                     self.app.set_dirty(False),
                 ))
             except Exception as error:
                 error_text = str(error)
-                self.after(0, lambda detail=error_text: (
+                self.app.post_ui(lambda detail=error_text: (
                     messagebox.showerror(
                         t("common.error"),
                         t("project.saveError", error=detail),
@@ -2001,14 +2233,7 @@ class Stage1Distribute(tk.Frame):
             if created_group:
                 self.app.video_groups.append(group)
             group['tracks'].extend(payload)
-            group['total_duration'] = sum(
-                max(
-                    0,
-                    item.get('trim_end', item.get('duration', 0))
-                    - item.get('trim_start', 0),
-                )
-                for item in group['tracks']
-            )
+            _refresh_group_duration(group)
             self.manual_group_idx = target_index
         except Exception:
             if created_group and group in self.app.video_groups:
@@ -2029,7 +2254,7 @@ class Stage1Distribute(tk.Frame):
         for idx in sorted(sel, reverse=True):
             if idx < len(tracks):
                 tracks.pop(idx)
-        g['total_duration'] = sum(ti.get('duration', 0) for ti in tracks)
+        _refresh_group_duration(g)
         self._refresh_manual()
         self.app.persist_video_groups()
 
@@ -2265,16 +2490,8 @@ class Stage1Distribute(tk.Frame):
             insert_at -= 1
         insert_at = max(0, min(insert_at, len(target_tracks)))
         target_tracks.insert(insert_at, item)
-        source['total_duration'] = sum(
-            max(0, item.get('trim_end', item.get('duration', 0))
-                - item.get('trim_start', 0))
-            for item in source_tracks
-        )
-        target['total_duration'] = sum(
-            max(0, item.get('trim_end', item.get('duration', 0))
-                - item.get('trim_start', 0))
-            for item in target_tracks
-        )
+        _refresh_group_duration(source)
+        _refresh_group_duration(target)
         self._clear_group_drag()
         self._refresh_group_list()
         self._manual_group_list.selection_set(insert_at)
@@ -2403,7 +2620,10 @@ class Stage1Distribute(tk.Frame):
         avoid_same_artist = self.avoid_artist_var.get()
 
         def _on_progress(current, total, msg):
-            self.after(0, lambda c=current, tt=total, m=msg: self.dist_status.configure(text=f"{m} {c+1}/{tt}"))
+            self.app.post_ui(
+                lambda c=current, tt=total, m=msg:
+                self.dist_status.configure(text=f"{m} {c+1}/{tt}")
+            )
 
         def run():
             try:
@@ -2416,6 +2636,7 @@ class Stage1Distribute(tk.Frame):
                 for g in groups:
                     for ti in g['tracks']:
                         ti['analysis'] = ti['track'].analysis
+                    _refresh_group_duration(g)
 
                 def _apply():
                     self.app.video_groups = groups
@@ -2423,12 +2644,12 @@ class Stage1Distribute(tk.Frame):
                     self.dist_status.configure(text=t("dist.groupsCreated", count=len(groups)))
                     self.app.enable_next(bool(groups))
                     self.app.persist_video_groups()
-                self.after(0, _apply)
+                self.app.post_ui(_apply)
             except Exception as e:
                 def _show_error(error=e):
                     self.dist_status.configure(text=t("dist.distributeFailed"))
                     messagebox.showerror(t("common.error"), str(error))
-                self.after(0, _show_error)
+                self.app.post_ui(_show_error)
         threading.Thread(target=run, daemon=True).start()
 
 
@@ -2649,7 +2870,7 @@ class Stage2MusicEdit(tk.Frame):
             x_cursor = x_end
         self._track_rects = rects
         group = self.app.video_groups[self.selected_group]
-        group['total_duration'] = x_cursor
+        _refresh_group_duration(group)
         self._precompute_waveforms()
 
     def _precompute_waveforms(self):
@@ -2686,8 +2907,7 @@ class Stage2MusicEdit(tk.Frame):
             if samples is None or len(samples) == 0:
                 return
             peaks = _waveform_peaks(samples)
-            self.after(
-                0,
+            self.app.post_ui(
                 lambda: self._waveform_ready(
                     filepath, (peaks, sr, len(samples))
                 ),
@@ -3152,13 +3372,15 @@ class Stage2MusicEdit(tk.Frame):
             volume=float(track.get('volume', 1.0)),
             fade_in=float(track.get('fade_in', 0.01)),
             fade_out=float(track.get('fade_out', 0.01)),
-            on_ready=lambda: self.after(
-                0, lambda: self._start_preview_playhead(
+            on_ready=lambda: self.app.post_ui(
+                lambda: self._start_preview_playhead(
                     end - start, timeline_start
                 )
             ),
-            on_error=lambda error: self.after(
-                0, lambda: messagebox.showerror(t("audio.previewError"), str(error))
+            on_error=lambda error: self.app.post_ui(
+                lambda: messagebox.showerror(
+                    t("audio.previewError"), str(error)
+                )
             ),
         )
 
@@ -3896,7 +4118,7 @@ class _LazyStage(tk.Frame):
 
 
 class AutoPlaylistMakerApp:
-    def __init__(self, defer_show=False):
+    def __init__(self, defer_show=False, root=None):
         _ensure_project_module()
         self.tracks = []
         self.video_groups = []
@@ -3908,16 +4130,14 @@ class AutoPlaylistMakerApp:
         self._state_save_after_id = None
         self._project_save_lock = threading.Lock()
         self._project_save_generation = 0
+        self._ui_queue = queue.Queue()
+        self._ui_queue_after_id = None
+        self._has_restored_project_state = False
+        self._analysis_overlay = None
+        self._fullscreen = False
 
-        root = None
-        if '--safe' not in sys.argv:
-            try:
-                from tkinterdnd2 import TkinterDnD
-                root = TkinterDnD.Tk()
-            except Exception:
-                pass
         if root is None:
-            root = tk.Tk()
+            root = _create_tk_root()
         if defer_show:
             root.withdraw()
 
@@ -3925,30 +4145,79 @@ class AutoPlaylistMakerApp:
         self.root.title(t("splash.title") + " v" + APP_VERSION)
         self.root.geometry("1200x750")
         self.root.minsize(950, 620)
+        self.root.resizable(True, True)
         self.root.configure(bg=THEME['bg_main'])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._set_icon()
+        self.root.bind("<F11>", self._toggle_fullscreen)
+        self.root.bind("<Escape>", self._exit_fullscreen)
 
         self._apply_theme()
         self.build_nav()
         self.build_stages()
         self.show_stage(0)
         self._install_dirty_tracking()
+        self._ui_queue_after_id = self.root.after(
+            25, self._drain_ui_queue
+        )
+
+    def post_ui(self, callback):
+        self._ui_queue.put(callback)
+
+    def _drain_ui_queue(self):
+        self._ui_queue_after_id = None
+        while True:
+            try:
+                callback = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                callback()
+            except Exception as error:
+                _log_error("Queued UI callback failed", error)
+        if not getattr(self, "_closing", False):
+            self._ui_queue_after_id = self.root.after(
+                25, self._drain_ui_queue
+            )
+
+    def _capture_page_states(self):
+        from ui_state import capture_pages
+        current = capture_pages(getattr(self, "stages", []))
+        if not getattr(self, "_lazy_stage_mode", False):
+            return current
+        merged = {
+            state["class"]: state
+            for state in (
+                getattr(self, "_pending_stage_state", None) or []
+            )
+            if state.get("class") != "_LazyStage"
+        }
+        for state in current:
+            if state.get("class") != "_LazyStage":
+                merged[state["class"]] = state
+        return list(merged.values())
 
     def collect_project_state(self):
-        from ui_state import capture_pages
         def safe_int(value, default=0):
             try:
                 return int(value)
             except (TypeError, ValueError):
                 return default
 
-        pages = capture_pages(self.stages) if hasattr(self, 'stages') else []
-        design = {}
-        visualizer = {}
-        render = {}
+        pages = self._capture_page_states()
+        design = dict(
+            getattr(self, "_pending_design_state", {}) or {}
+        )
+        visualizer = dict(
+            getattr(self, "_pending_visualizer_state", {}) or {}
+        )
+        render = dict(
+            getattr(self, "_pending_render_state", {}) or {}
+        )
         repeat = {}
-        visibility = {}
+        visibility = dict(
+            getattr(self, "_pending_visibility_state", {}) or {}
+        )
         if (hasattr(self, 'stages') and len(self.stages) > 4
                 and hasattr(self.stages[4], "_collect_config")):
             design_stage = self.stages[4]
@@ -3956,35 +4225,24 @@ class AutoPlaylistMakerApp:
             design = {
                 key: config[key]
                 for key in (
-                    'background', 'overlays', 'text', 'progress_bar',
-                    'fade', 'effects', 'global_audio',
+                    'layout', 'background', 'overlays', 'text', 'progress_bar',
+                    'fade', 'effects', 'global_audio', 'ambience_mixer',
                 )
                 if key in config
             }
             design['active_effects'] = config.get('active_effects', [])
+            design['effect_order'] = config.get('effect_order', [])
+            design['effect_instances'] = config.get('effect_instances', [])
             visualizer = config.get('visualizer', {})
             visibility = config.get('visibility', {})
-            from stage4_design_effects import LOOP_MODE_CHOICES
-            repeat_mode = _i18n_mod.choice_id(
-                design_stage.loop_mode_var.get(),
-                LOOP_MODE_CHOICES,
-                "count",
-            )
-            repeat = {
-                'enabled': design_stage.loop_video_var.get(),
-                'mode': repeat_mode,
-                'count': max(
-                    1, safe_int(design_stage.loop_count_var.get(), 1)
-                ),
-                'target_h': safe_int(design_stage.loop_target_h_var.get()),
-                'target_m': safe_int(design_stage.loop_target_m_var.get()),
-                'target_s': safe_int(design_stage.loop_target_s_var.get()),
-            }
         if (hasattr(self, 'stages') and len(self.stages) > 5
                 and hasattr(self.stages[5], "resolution")):
             render_stage = self.stages[5]
             render = {
                 'resolution': render_stage.resolution.get(),
+                'width': render_stage.custom_width_var.get(),
+                'height': render_stage.custom_height_var.get(),
+                'is_custom': render_stage.resolution.get() == 'custom',
                 'fps': render_stage.fps_var.get(),
                 'video_codec': render_stage.video_codec_var.get(),
                 'audio_codec': render_stage.audio_codec_var.get(),
@@ -3993,6 +4251,22 @@ class AutoPlaylistMakerApp:
                 'normalize_loudness': render_stage.normalize_loudness_var.get(),
                 'target_lufs': render_stage.target_lufs_var.get(),
                 'output_dir': render_stage._last_render_dir or '',
+            }
+            from stage5_render import LOOP_MODE_CHOICES
+            repeat_mode = _i18n_mod.choice_id(
+                render_stage.loop_mode_var.get(),
+                LOOP_MODE_CHOICES,
+                "count",
+            )
+            repeat = {
+                'enabled': render_stage.loop_video_var.get(),
+                'mode': repeat_mode,
+                'count': max(
+                    1, safe_int(render_stage.loop_count_var.get(), 1)
+                ),
+                'target_h': safe_int(render_stage.loop_target_h_var.get()),
+                'target_m': safe_int(render_stage.loop_target_m_var.get()),
+                'target_s': safe_int(render_stage.loop_target_s_var.get()),
             }
         return {
             'current_step': self.current_stage,
@@ -4012,7 +4286,12 @@ class AutoPlaylistMakerApp:
                 getattr(self, "_pending_repeat_state", {}) or {}
             ),
             'visibility': visibility,
-            'ui': {'dark_mode': self.dark_mode},
+            'ui': {
+                'dark_mode': self.dark_mode,
+                'geometry': self.root.geometry(),
+                'maximized': self.root.state() == 'zoomed',
+                'fullscreen': self._fullscreen,
+            },
         }
 
     def restore_project_state(self, state):
@@ -4021,85 +4300,204 @@ class AutoPlaylistMakerApp:
         from ui_state import restore_pages
         self._suspend_state_tracking = True
         try:
-            restore_pages(self.stages, state.get('pages', []))
+            self._has_restored_project_state = True
+            page_states = state.get('pages', [])
+            self._pending_design_state = dict(
+                state.get("design", {}) or {}
+            )
+            self._pending_visualizer_state = dict(
+                state.get("visualizer", {}) or {}
+            )
+            self._pending_render_state = dict(
+                state.get("render", {}) or {}
+            )
+            self._pending_visibility_state = dict(
+                state.get("visibility", {}) or {}
+            )
+            self._pending_repeat_state = dict(state.get('repeat', {}))
+            ui_state = state.get('ui', {}) or {}
+            geometry = ui_state.get('geometry')
+            if geometry:
+                try:
+                    self.root.geometry(geometry)
+                except tk.TclError:
+                    logger.warning("Ignored invalid saved window geometry: %s", geometry)
+            if ui_state.get('maximized'):
+                try:
+                    self.root.state('zoomed')
+                except tk.TclError:
+                    pass
+            restore_pages(self.stages, page_states)
+            self._pending_stage_state = page_states
             if len(self.stages) > 4 and hasattr(
                 self.stages[4], "_restore_effect_card_state"
             ):
-                design_state = state.get("design", {}) or {}
-                has_effect_state = any(
-                    "active_effect_ids" in page.get("plain", {})
-                    for page in state.get("pages", [])
-                )
-                if not has_effect_state:
-                    from stage4_design_effects import EFFECT_DEFINITIONS
-                    saved_effects = design_state.get("active_effects")
-                    # Pre-card projects exposed every legacy effect control.
-                    # Keep their output unchanged on first migration.
-                    self.stages[4].active_effect_ids = list(
-                        saved_effects
-                        if isinstance(saved_effects, list)
-                        else EFFECT_DEFINITIONS
-                    )
-                    self.stages[4]._restore_effect_card_state()
-                audio_state = design_state.get("global_audio", {})
-                has_audio_page_state = any(
-                    "music_master_db" in page.get("variables", {})
-                    for page in state.get("pages", [])
-                )
-                design_stage = self.stages[4]
-                if audio_state and not has_audio_page_state:
-                    for variable_name, field_name, default in (
-                        ("music_master_db", "music_master_db", 0.0),
-                        ("normalize_tracks", "normalize_tracks", False),
-                        ("target_lufs", "target_lufs", -14.0),
-                        ("true_peak_ceiling", "true_peak_dbtp", -1.0),
-                        (
-                            "max_normalize_gain",
-                            "max_auto_gain_db",
-                            12.0,
-                        ),
-                        (
-                            "ambient_master_db",
-                            "ambient_master_db",
-                            -18.0,
-                        ),
-                    ):
-                        getattr(design_stage, variable_name).set(
-                            audio_state.get(field_name, default)
-                        )
-                    design_stage.ambient_tracks = list(
-                        audio_state.get("ambient_tracks", [])
-                    )
-                    design_stage._refresh_ambient_list()
-                elif not has_audio_page_state:
-                    legacy_render = state.get("render", {})
-                    if legacy_render.get("normalize_loudness"):
-                        design_stage.normalize_tracks.set(True)
-                        design_stage.target_lufs.set(
-                            legacy_render.get("target_lufs", -14.0)
-                        )
-            self._pending_repeat_state = dict(state.get('repeat', {}))
-            if len(self.stages) > 4 and hasattr(
-                    self.stages[4], "loop_video_var"):
-                self._apply_repeat_state_to_design(self.stages[4])
+                self._apply_saved_design_state(self.stages[4])
             if len(self.stages) > 5 and hasattr(self.stages[5], "_last_render_dir"):
-                self.stages[5]._last_render_dir = state.get('render', {}).get('output_dir') or None
-            if len(self.stages) > 4 and hasattr(self.stages[4], "visibility_enabled"):
-                vis = state.get('visibility', {})
-                ds = self.stages[4]
-                if vis.get('enabled'):
-                    ds.visibility_enabled.set(True)
-                ds.set_visibility_seconds(
-                    vis.get("turn_off_after", vis.get("initial_visible", 0)),
-                    vis.get("restore_before_end", vis.get("ending_visible", 0)),
-                    vis.get("restore", bool(vis.get("ending_visible", 0))),
-                )
+                self._apply_saved_render_state(self.stages[5])
             step = int(state.get('current_step', 0))
             self.show_stage(max(0, min(step, len(self.stages) - 1)))
         finally:
             self._suspend_state_tracking = False
 
-    def _apply_repeat_state_to_design(self, stage):
+    def _apply_saved_design_state(self, design_stage):
+        if not self._has_restored_project_state:
+            return
+        pages = getattr(self, "_pending_stage_state", None) or []
+        design_state = getattr(self, "_pending_design_state", {}) or {}
+        has_effect_state = any(
+            "active_effect_ids" in page.get("plain", {})
+            for page in pages
+        )
+        if not has_effect_state:
+            from stage4_design_effects import EFFECT_DEFINITIONS
+            saved_effects = design_state.get("active_effects")
+            saved_order = design_state.get("effect_order")
+            design_stage.active_effect_ids = list(
+                saved_order
+                if isinstance(saved_order, list)
+                else saved_effects
+                if isinstance(saved_effects, list)
+                else EFFECT_DEFINITIONS
+            )
+            instances = design_state.get("effect_instances")
+            enabled = (
+                {
+                    item.get("id"): bool(item.get("enabled", True))
+                    for item in instances if isinstance(item, dict)
+                    and item.get("id") in EFFECT_DEFINITIONS
+                }
+                if isinstance(instances, list) else {}
+            )
+            design_stage.effect_enabled_states = {
+                effect_id: enabled.get(
+                    effect_id,
+                    effect_id in saved_effects
+                    if isinstance(saved_effects, list) else True,
+                )
+                for effect_id in design_stage.active_effect_ids
+            }
+            design_stage._restore_effect_card_state()
+        audio_state = design_state.get("global_audio", {})
+        has_audio_page_state = any(
+            "music_master_db" in page.get("variables", {})
+            for page in pages
+        )
+        if audio_state and not has_audio_page_state:
+            for variable_name, field_name, default in (
+                ("music_master_db", "music_master_db", 0.0),
+                ("normalize_tracks", "normalize_tracks", False),
+                ("target_lufs", "target_lufs", -14.0),
+                ("true_peak_ceiling", "true_peak_dbtp", -1.0),
+                ("max_normalize_gain", "max_auto_gain_db", 12.0),
+            ):
+                getattr(design_stage, variable_name).set(
+                    audio_state.get(field_name, default)
+                )
+        elif not has_audio_page_state:
+            legacy_render = (
+                getattr(self, "_pending_render_state", {}) or {}
+            )
+            if legacy_render.get("normalize_loudness"):
+                design_stage.normalize_tracks.set(True)
+                design_stage.target_lufs.set(
+                    legacy_render.get("target_lufs", -14.0)
+                )
+        has_ambience_page_state = any(
+            "ambience_sources" in page.get("plain", {})
+            for page in pages
+        )
+        if not has_ambience_page_state:
+            import copy
+            mixer_state = design_state.get("ambience_mixer", {})
+            if isinstance(mixer_state.get("sources"), dict):
+                design_stage.ambience_sources = copy.deepcopy(
+                    mixer_state["sources"]
+                )
+                design_stage.ambience_random_seed.set(
+                    mixer_state.get("random_seed", 12345)
+                )
+            else:
+                legacy_tracks = audio_state.get("ambient_tracks", [])
+                master_db = float(audio_state.get("ambient_master_db", 0))
+                migrated = {}
+                legacy_files = []
+                for item in legacy_tracks:
+                    category_id = item.get("category_id")
+                    if category_id in design_stage.ambience_sources:
+                        migrated[category_id] = {
+                            "enabled": bool(item.get("enabled", True)),
+                            "volume_db": float(
+                                item.get("volume_db", -18)
+                            ) + master_db,
+                        }
+                    elif item.get("filepath"):
+                        legacy_files.append(copy.deepcopy(item))
+                design_stage.ambience_sources.update(migrated)
+                design_stage._legacy_ambient_tracks = legacy_files
+                if migrated or legacy_files:
+                    if "ambience_mixer" not in design_stage.active_effect_ids:
+                        design_stage.active_effect_ids.append(
+                            "ambience_mixer"
+                        )
+                    design_stage.effect_enabled_states[
+                        "ambience_mixer"
+                    ] = True
+            design_stage._restore_effect_card_state()
+        visibility = (
+            getattr(self, "_pending_visibility_state", {}) or {}
+        )
+        has_visibility_page_state = any(
+            "visibility_enabled" in page.get("variables", {})
+            for page in pages
+        )
+        if (
+            visibility
+            and not has_visibility_page_state
+            and hasattr(design_stage, "visibility_enabled")
+        ):
+            design_stage.visibility_enabled.set(
+                bool(visibility.get("enabled", False))
+            )
+            design_stage.set_visibility_seconds(
+                visibility.get(
+                    "turn_off_after",
+                    visibility.get("initial_visible", 0),
+                ),
+                visibility.get(
+                    "restore_before_end",
+                    visibility.get("ending_visible", 0),
+                ),
+                visibility.get(
+                    "restore",
+                    bool(visibility.get("ending_visible", 0)),
+                ),
+            )
+
+    def _apply_saved_render_state(self, render_stage):
+        pages = getattr(self, "_pending_stage_state", None) or []
+        has_output_page_state = any(
+            "_last_render_dir" in page.get("plain", {})
+            for page in pages
+        )
+        if not has_output_page_state:
+            saved = getattr(self, "_pending_render_state", {}) or {}
+            render_stage._last_render_dir = saved.get("output_dir") or None
+            for key, variable in (
+                ("resolution", render_stage.resolution),
+                ("width", render_stage.custom_width_var),
+                ("height", render_stage.custom_height_var),
+                ("fps", render_stage.fps_var),
+                ("video_codec", render_stage.video_codec_var),
+                ("audio_codec", render_stage.audio_codec_var),
+                ("video_bitrate", render_stage.video_bitrate_var),
+                ("audio_bitrate", render_stage.audio_bitrate_var),
+            ):
+                if key in saved:
+                    variable.set(str(saved[key]))
+        self._apply_repeat_state_to_render(render_stage)
+
+    def _apply_repeat_state_to_render(self, stage):
         repeat = getattr(self, "_pending_repeat_state", None) or {}
         if not repeat:
             return
@@ -4166,6 +4564,12 @@ class AutoPlaylistMakerApp:
         ):
             return
         self._closing = True
+        if self._ui_queue_after_id:
+            try:
+                self.root.after_cancel(self._ui_queue_after_id)
+            except tk.TclError:
+                pass
+            self._ui_queue_after_id = None
         if self._state_save_after_id:
             try:
                 self.root.after_cancel(self._state_save_after_id)
@@ -4190,11 +4594,6 @@ class AutoPlaylistMakerApp:
             player = getattr(stage, "_preview_audio_player", None)
             if player is not None:
                 player.stop()
-        try:
-            for after_id in self.root.tk.call('after', 'info'):
-                self.root.after_cancel(after_id)
-        except tk.TclError:
-            pass
         try:
             import psutil
             children = psutil.Process(os.getpid()).children(recursive=True)
@@ -4332,10 +4731,35 @@ class AutoPlaylistMakerApp:
                                         self._toggle_theme, padx=8)
         self.theme_btn.pack(side=tk.RIGHT, padx=(0, 8), pady=11)
 
+        self.fullscreen_btn = styled_button(
+            self._nav_right_frame, t("navigation.fullscreen"),
+            self._toggle_fullscreen, padx=8,
+        )
+        self.fullscreen_btn.pack(side=tk.RIGHT, padx=(0, 8), pady=11)
+
         self.next_btn = styled_button(self._nav_right_frame, t("navigation.next"), self.go_next, "primary", padx=12)
         self.next_btn.pack(side=tk.RIGHT, padx=(0, 16), pady=11)
         set_button_state(self.next_btn, tk.DISABLED)
         self._nav_right_frame.pack(side=tk.RIGHT)
+
+    def _toggle_fullscreen(self, _event=None):
+        self._fullscreen = not self._fullscreen
+        self.root.attributes('-fullscreen', self._fullscreen)
+        if hasattr(self, 'fullscreen_btn'):
+            self.fullscreen_btn.configure(text=t(
+                "navigation.exitFullscreen" if self._fullscreen
+                else "navigation.fullscreen"
+            ))
+        return "break"
+
+    def _exit_fullscreen(self, _event=None):
+        if not self._fullscreen:
+            return None
+        self._fullscreen = False
+        self.root.attributes('-fullscreen', False)
+        if hasattr(self, 'fullscreen_btn'):
+            self.fullscreen_btn.configure(text=t("navigation.fullscreen"))
+        return "break"
 
     def _apply_nav_rtl(self, rtl):
         if rtl == self._nav_rtl:
@@ -4353,8 +4777,7 @@ class AutoPlaylistMakerApp:
             self._nav_right_frame.pack(side=tk.RIGHT)
 
     def _toggle_theme(self):
-        from ui_state import capture_pages
-        stage_state = capture_pages(self.stages)
+        stage_state = self._capture_page_states()
         self.dark_mode = not self.dark_mode
         self._apply_theme()
 
@@ -4415,7 +4838,7 @@ class AutoPlaylistMakerApp:
         self._output_settings_linked = False
         factories = (
             Stage0Project, Stage1Distribute, Stage2MusicEdit,
-            Stage2ClipList, Stage4DesignEffects, Stage5Render,
+            Stage2ClipList, _create_design_stage, _create_render_stage,
         )
         self._stage_factories = factories
         self._lazy_stage_mode = bool(getattr(sys, "frozen", False))
@@ -4438,11 +4861,13 @@ class AutoPlaylistMakerApp:
         stage = self._stage_factories[index](self._stage_container, self)
         self.stages[index] = stage
         pending = getattr(self, "_pending_stage_state", None)
-        if pending and index < len(pending):
+        if pending:
             from ui_state import restore_pages
-            restore_pages([stage], [pending[index]])
+            restore_pages([stage], pending)
         if index == 4:
-            self._apply_repeat_state_to_design(stage)
+            self._apply_saved_design_state(stage)
+        elif index == 5:
+            self._apply_saved_render_state(stage)
         if index in (4, 5):
             self._link_preview_output_settings()
         for value in vars(stage).values():
@@ -4473,7 +4898,18 @@ class AutoPlaylistMakerApp:
                 return
             self._syncing_output_settings = True
             try:
-                target.set(source.get())
+                value = source.get()
+                choices = (
+                    getattr(source, "_choice_values", None)
+                    or getattr(target, "_choice_values", None)
+                )
+                if choices:
+                    value = _i18n_mod.choice_id(
+                        value, choices, next(iter(choices), "")
+                    )
+                    if source.get() != value:
+                        source.set(value)
+                target.set(value)
             finally:
                 self._syncing_output_settings = False
 
@@ -4506,8 +4942,7 @@ class AutoPlaylistMakerApp:
     def _on_language_changed(self):
         rtl = _i18n_mod.get_instance().is_rtl()
         self._apply_nav_rtl(rtl)
-        from ui_state import capture_pages
-        stage_state = capture_pages(self.stages)
+        stage_state = self._capture_page_states()
         self._rebuild_stages(stage_state)
 
     def show_stage(self, idx):
@@ -4599,8 +5034,7 @@ class AutoPlaylistMakerApp:
                         video_groups=groups_snapshot,
                         app_state=app_state,
                     )
-                self.root.after(
-                    0,
+                self.post_ui(
                     lambda: (
                         self.set_dirty(False)
                         if save_generation == self._project_save_generation
@@ -4628,7 +5062,8 @@ class AutoPlaylistMakerApp:
 
 class SplashScreen:
     def __init__(self):
-        self.root = tk.Tk()
+        self.root = _create_tk_root()
+        self._handed_off = False
         self.root.overrideredirect(True)
         self.root.configure(bg='#111827')
         self.root.attributes('-topmost', True)
@@ -4642,9 +5077,9 @@ class SplashScreen:
         y = (sh - h) // 2
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
-        outer = tk.Frame(self.root, bg='#111827')
-        outer.pack(fill=tk.BOTH, expand=True)
-        inner = tk.Frame(outer, bg='#111827')
+        self.outer = tk.Frame(self.root, bg='#111827')
+        self.outer.pack(fill=tk.BOTH, expand=True)
+        inner = tk.Frame(self.outer, bg='#111827')
         inner.pack(fill=tk.BOTH, expand=True)
 
         try:
@@ -4687,8 +5122,10 @@ class SplashScreen:
         try:
             self.status_var.set(text)
             self.bar_max = max(1, self.bar_canvas.winfo_width())
-            self.bar_width = int(progress * self.bar_max)
             self.bar_canvas.delete("all")
+            self.bar_width = (
+                int(progress * self.bar_max) if progress is not None else 0
+            )
             if self.bar_width > 0:
                 self.bar_canvas.create_rectangle(0, 0, self.bar_width, 8,
                                                   fill='#818cf8', outline='')
@@ -4699,9 +5136,19 @@ class SplashScreen:
 
     def close(self):
         try:
-            self.root.destroy()
+            if self._handed_off:
+                self.root.withdraw()
+                self.outer.destroy()
+                self.root.overrideredirect(False)
+                self.root.attributes('-topmost', False)
+            else:
+                self.root.destroy()
         except tk.TclError:
             pass
+
+    def handoff_root(self):
+        self._handed_off = True
+        return self.root
 
 
 class NativeSplash:
@@ -4725,8 +5172,6 @@ class NativeSplash:
 
 
 def _create_startup_splash():
-    if "--launcher-splash" in sys.argv:
-        return SplashScreen()
     if getattr(sys, "frozen", False) and os.environ.get("_PYI_SPLASH_IPC"):
         try:
             return NativeSplash()
@@ -4738,7 +5183,7 @@ def _create_startup_splash():
 # ─── 진입점 ───
 
 def _load_heavy_modules_step(splash, step, prog):
-    splash.update(step, prog)
+    splash.update(step, None)
     time.sleep(0.01)
 
 
@@ -4768,7 +5213,7 @@ def _write_ffmpeg_log(lines):
             pass
 
 
-def main():
+def main(startup_splash=None):
     _startup_mark("python_entry")
     if sys.platform == "win32":
         try:
@@ -4785,7 +5230,7 @@ def main():
         if sys.stderr is None:
             sys.stderr = open(os.devnull, 'w', encoding='utf-8')
 
-    splash = _create_startup_splash()
+    splash = startup_splash or _create_startup_splash()
     _startup_mark("startup_splash_visible")
 
     _load_heavy_modules_step(splash, t("splash.loadingProject"), 0.65)
@@ -4793,13 +5238,24 @@ def main():
     _startup_mark("project_model_ready")
     _load_heavy_modules_step(splash, t("splash.loadingGui"), 0.90)
 
-    app = AutoPlaylistMakerApp(defer_show=True)
     splash.update(t("splash.complete"), 1.0)
+    root = (
+        splash.handoff_root()
+        if hasattr(splash, "handoff_root") else None
+    )
+    _startup_mark("main_window_create_start")
+    app = AutoPlaylistMakerApp(defer_show=root is None, root=root)
+    _startup_mark("main_window_create_end")
+    if root is not None:
+        splash.close()
     app.root.deiconify()
     app.root.update_idletasks()
     app.root.update()
-    _startup_mark("main_window_interactive")
-    splash.close()
+    _startup_mark("main_window_first_paint")
+    _startup_mark("basic_ui_interactive")
+    if root is None:
+        splash.close()
+    _startup_mark("splash_close")
     app.root.lift()
     app.run()
 

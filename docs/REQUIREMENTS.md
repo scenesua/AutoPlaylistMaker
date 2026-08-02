@@ -257,7 +257,7 @@
 
 ## UI-002 시작 스플래시·아이콘·버전 표시
 
-- 상세 설명: 실행 직후 아이콘 중심 스플래시, 회색 상태 텍스트와 progress bar, 앱 아이콘, v1.3.0 표시를 제공한다.
+- 상세 설명: 실행 직후 아이콘 중심 스플래시, 회색 상태 텍스트와 progress bar, 앱 아이콘, 지정 버전 1.3.1 표시를 제공한다.
 - 최초 확인 출처: 현재 채팅의 스플래시·아이콘 반복 수정 요청
 - 최초 적용 버전 / 마지막 변경 버전: 1.2.0 / 1.3.0
 - 현재 상태: 완료
@@ -292,12 +292,12 @@
 
 - 상세 설명: 실행 요청이 사용자에게 즉시 보이고 메인 화면까지 과도하게 기다리지 않도록 한다.
 - 최초 확인 출처: 현재 채팅의 시작 속도 최적화 요청
-- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.0
-- 현재 상태: 회귀 발생
+- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.1
+- 현재 상태: 1.3.1 개선, 추가 최적화 필요
 - 관련 코드·문서: `app.py:_LazyStage`, `SplashScreen`, 빌드 구성
 - 관련 결정: DEC-008
 - 완료 조건·테스트: cold/warm start를 같은 장비에서 측정하고 병목별 목표를 정한 뒤 달성
-- 비고: 2026-07-30 Windows one-dir 최종 cold smoke에서 native icon 2.53초, loading 53.09초, main window 87.24초였다. 즉시 피드백은 해결됐지만 core 시작 시간은 미해결이다.
+- 비고: 1.3.1에서 heavy stage/NumPy import를 지연하고 Python loading splash의 Tk root를 main window에 재사용했다. 최종 단일 EXE Windows onedir smoke의 main window는 64.536초였으며 절대 시간은 여전히 길다.
 
 ## SHUTDOWN-001 종료 시 자원 정리
 
@@ -314,8 +314,8 @@
 
 - 상세 설명: 1.2 계열을 덮어쓰지 않는 `AutoPlaylistMaker_v1.3.0` 폴더와 ZIP을 만들고 metadata·locales·FFmpeg·Tcl/Tk를 포함한다.
 - 최초 확인 출처: 현재 채팅의 버전 폴더 분리·빌드 요청
-- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.0
-- 현재 상태: 부분 완료
+- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.1
+- 현재 상태: 완료
 - 관련 코드·문서: `build_windows_onedir.ps1`, `build_windows.ps1`, `build_mac.sh`, `.github/workflows/build.yml`
 - 관련 결정: DEC-001
 - 완료 조건·테스트: Windows와 macOS 각각 사용자 지정 버전명으로 빌드·실행·종료·ZIP 검증
@@ -330,18 +330,18 @@
 - 관련 코드·문서: `stage4_design_effects.py`, `app.py`, `ui_state.py`, `tests/test_ui_interactions.py`
 - 관련 결정: DEC-011
 - 완료 조건·테스트: 빈 초기 상태, 추가 후 즉시 preview·dirty 반영, 검색·스크롤·키보드·바깥 닫기, 구형 프로젝트 migration, 섹션 범위 reset
-- 비고: 검색·카테고리 구분·키보드·스크롤·화면 경계 배치는 구현됐다. 카테고리 hover/click 하위 메뉴와 화면 경계에서 하위 메뉴 방향을 뒤집는 계층형 동작은 구현되지 않아 1.3.1로 이월한다. 현재 효과는 단일 인스턴스이며 카드 순서는 inspector 정리 순서이고 renderer 합성은 기존 고정 의미 순서를 유지한다.
+- 비고: 검색·키보드·스크롤과 함께 카테고리 hover/click 하위 메뉴 및 화면 오른쪽 경계의 좌측 전환을 구현했다. 효과는 단일 인스턴스이며 카드 순서는 inspector 정리 순서이고 renderer 합성은 기존 고정 의미 순서를 유지한다.
 
-## AUDIO-004 전역 오디오 버스·환경음·미터
+## AUDIO-004 전역 음악 처리·통합 환경음 효과·버스 미터
 
-- 상세 설명: 음악 master, 트랙별 음량 정규화, 환경음 레이어/master, True Peak 제한과 실제 master/music/ambient L/R 미터를 시각 효과와 분리해 제공한다.
+- 상세 설명: 전역 오디오는 음악 master·트랙별 정규화·True Peak만 제공한다. 환경음은 효과 랙의 단일 `ambience_mixer` 효과이며, 내부 렌더에서만 독립 ambient bus로 처리한다.
 - 최초 확인 출처: 현재 채팅의 전역 오디오 시스템 개편 요청
-- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.0
+- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.1
 - 현재 상태: 완료
 - 관련 코드·문서: `audio_pipeline.py`, `stage4_design_effects.py`, `stage5_render.py`, `app.py`, `tests/test_audio_pipeline.py`
 - 관련 결정: DEC-012
-- 완료 조건·테스트: 독립 music/ambient/master bus, stem 기반 meter, LUFS cache·gain 제한·True Peak, 반복 출력 전체에 연속 환경음, preview/final level 비교
-- 비고: momentary/short-term LUFS와 환경음 이벤트 스케줄러는 범위에 포함하지 않는다.
+- 완료 조건·테스트: 효과 랙의 단일 환경음 슬롯, 종류별 활성·볼륨 저장, 독립 music/ambient/master bus, LUFS cache·True Peak, 반복·검은 화면 전체 환경음, preview/final 동일 설정, Windows 명령 길이 제한 회피
+- 비고: momentary/short-term LUFS는 범위에 포함하지 않는다. 1.3.1에서 내장 환경음의 결정적 연속/이벤트 스케줄러를 추가했다.
 
 ## UI-005 Stage 4 작업 배치와 역할 색상
 
@@ -354,13 +354,21 @@
 - 완료 조건·테스트: preview 좌측·inspector 우측, Stage 5 light root, danger/success hover, 950×620·1200×750·대형 창·긴 효과 목록 캡처
 - 비고: OS DPI 배율과 모든 번역 장문은 별도 실기기 검수가 남는다.
 
-## UI-006 두 단계 시작 스플래시
+## UI-006 단일 EXE 시작 스플래시
 
-- 상세 설명: Python 초기화 전에는 배경 없는 아이콘 네이티브 스플래시를 표시하고, Tk가 준비되면 이를 진행 바·작업 문구 로딩 스플래시로 교체하며, 실제 메인 창이 보일 때 로딩 스플래시를 닫는다.
+- 상세 설명: Windows onedir의 단일 사용자 EXE가 PyInstaller splash를 표시하고, Tk 로딩 상태를 거쳐 실제 메인 창이 보일 때 스플래시를 닫는다.
 - 최초 확인 출처: 현재 채팅의 네이티브 스플래시·로고 교체·수명주기 요청
-- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.0
+- 최초 적용 버전 / 마지막 변경 버전: 1.3.0 / 1.3.1
 - 현재 상태: 완료
-- 관련 코드·문서: `native_launcher.cs`, `app.py`, `app_splash.png`, `build_windows_onedir.ps1`, `build_windows.ps1`
+- 관련 코드·문서: `app.py`, `app_splash.png`, `build_windows_onedir.ps1`, `build_windows.ps1`
 - 관련 결정: DEC-013
 - 완료 조건·테스트: cold start 5초 이내 투명 아이콘 표시, 아이콘→로딩→메인 전환 공백 1초 미만, 로딩 진행 바·실제 작업 문구 표시, 메인 뒤 잔류 없음
-- 비고: 코어의 실제 cold-start 시간은 ISSUE-PERF-001로 계속 관리한다.
+- 비고: 로딩 스플래시 Tk root를 메인 창으로 넘겨 두 단계 표시를 유지하면서 중복 Tk 초기화를 제거했다. 코어의 추가 cold-start 최적화는 ISSUE-PERF-001로 계속 관리한다.
+# 1.3.1 효과 편집 요구사항
+
+- 효과 UI는 Stage 4의 미리보기 오른쪽 고정 효과 랙과 효과별 설정 창을 사용한다.
+- 창 닫기와 효과 삭제를 구분하고, 설정·활성 상태·순서·파일 경로를 project format v4 호환 데이터에 저장한다.
+- UI 순서 변경은 실제 renderer 합성 순서와 일치해야 하며 고정 단계는 이동 불가로 표시한다.
+- visualizer는 배경을 제거하지 않고 알파 합성한다.
+- beat time은 trim source offset과 그룹 전역 시간을 반영해 preview와 final renderer가 함께 사용한다.
+- preview 재구성은 기존 timer/audio/video를 중복 실행하지 않고 가능한 경우 재생 위치를 복원한다.

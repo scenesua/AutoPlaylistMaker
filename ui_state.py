@@ -7,8 +7,9 @@ import tkinter as tk
 _PLAIN_STATE_FIELDS = {
     "selected_group", "manual_group_idx", "distribute_mode",
     "tl_sel", "tl_px_per_sec", "playhead_sec", "clip_preview_ratio",
-    "active_effect_ids", "effect_card_states",
-    "ambient_tracks",
+    "active_effect_ids", "effect_enabled_states", "effect_card_states",
+    "ambience_sources", "_legacy_ambient_tracks",
+    "_last_render_dir",
 }
 
 
@@ -29,6 +30,15 @@ def capture_pages(pages):
             }
         for name, value in vars(page).items():
             if isinstance(value, tk.Variable):
+                if (
+                    type(page).__name__ == "Stage4DesignEffects"
+                    and name in {
+                        "loop_video_var", "loop_mode_var", "loop_count_var",
+                        "loop_target_h_var", "loop_target_m_var",
+                        "loop_target_s_var",
+                    }
+                ):
+                    continue
                 try:
                     variables[name] = value.get()
                 except tk.TclError:

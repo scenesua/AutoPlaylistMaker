@@ -2,21 +2,95 @@ import os
 import json
 import random
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
 from analyzer import compute_energy_profile
 from distributor import distribute_tracks, sequence_score
-from project import Project
-from render_jobs import RenderJob
+from project import PROJECT_FORMAT_VERSION, Project
+from render_jobs import RenderJob, validate_media_output
 from transition import apply_edge_fades
 from app import Stage2MusicEdit, _waveform_peaks
 
 
 class CoreTests(unittest.TestCase):
+    def test_render_output_is_completed_only_after_ffprobe_validation(self):
+        payload = {
+            'streams': [
+                {'codec_type': 'video', 'width': 1280, 'height': 720},
+                {'codec_type': 'audio'},
+            ],
+            'format': {'duration': '60.25'},
+        }
+        with tempfile.NamedTemporaryFile(delete=False) as output:
+            output.write(b'0' * 2048)
+            output_path = output.name
+        try:
+            completed = SimpleNamespace(
+                returncode=0, stdout=json.dumps(payload), stderr=''
+            )
+            with patch('render_jobs.subprocess.run', return_value=completed):
+                result = validate_media_output(
+                    output_path, 'ffprobe', 1280, 720, 60.0
+                )
+            self.assertEqual(result['width'], 1280)
+            self.assertTrue(result['has_audio'])
+
+            payload['streams'][0]['width'] = 1920
+            completed.stdout = json.dumps(payload)
+            with patch('render_jobs.subprocess.run', return_value=completed):
+                with self.assertRaisesRegex(RuntimeError, 'resolution'):
+                    validate_media_output(
+                        output_path, 'ffprobe', 1280, 720, 60.0
+                    )
+        finally:
+            os.unlink(output_path)
+
+    def test_app_import_defers_heavy_design_and_analysis_modules(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys, app; "
+                "assert 'stage4_design_effects' not in sys.modules; "
+                "assert 'stage5_render' not in sys.modules; "
+                "assert 'numpy' not in sys.modules",
+            ],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_new_project_is_immediately_saved_and_rejects_unsafe_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            project = Project(root)
+            project.create("Regression")
+            self.assertTrue(os.path.isfile(project.project_file))
+            with open(project.project_file, encoding="utf-8") as handle:
+                data = json.load(handle)
+            self.assertEqual(data["format_version"], PROJECT_FORMAT_VERSION)
+            self.assertEqual(data["name"], "Regression")
+
+            for unsafe_name in (
+                "../escape", "bad/name", "bad:name", "bad.", "bad ",
+                " bad", "CON",
+            ):
+                with self.subTest(name=unsafe_name):
+                    with self.assertRaises(ValueError):
+                        Project(root).create(unsafe_name)
+            with self.assertRaises(FileExistsError):
+                Project(root).create("Regression")
+            os.makedirs(os.path.join(root, "ExistingFolder"))
+            with self.assertRaises(FileExistsError):
+                Project(root).create("ExistingFolder")
+
     def test_waveform_peaks_keep_final_partial_chunk(self):
         peaks = _waveform_peaks(
             np.array([-1.0, 0.5, -0.25, 0.75, 0.2]), max_peaks=2
@@ -94,8 +168,13 @@ class CoreTests(unittest.TestCase):
                 handle.write(b'x' * 2048)
             self.assertTrue(job.is_completed(0))
             self.assertFalse(job.cancelled)
+            job.set_state("PREPARING")
+            self.assertTrue(os.path.isfile(job.log_path))
+            with open(job.log_path, encoding="utf-8") as stream:
+                self.assertIn("state=PREPARING", stream.read())
             job.cancel()
             self.assertTrue(job.cancelled)
+            os.remove(job.log_path)
 
     def test_energy_keeps_partial_segment(self):
         result = compute_energy_profile(
@@ -236,6 +315,33 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(track['effects']['lowpass'], 9000)
             self.assertEqual(track['metadata']['note'], 'keep')
             self.assertEqual(restored.app_state['current_step'], 4)
+
+    def test_project_load_recovers_file_list_from_group_media(self):
+        with tempfile.TemporaryDirectory() as root:
+            audio = os.path.join(root, "song.wav")
+            image = os.path.join(root, "cover.png")
+            open(audio, "wb").close()
+            open(image, "wb").close()
+            project = Project(os.path.join(root, "projects"))
+            project.create("recoverable")
+            with open(project.project_file, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            data["files"] = []
+            data["video_groups"] = [{
+                "name": "Mix 1",
+                "tracks": [{"filepath": audio}],
+                "clips": [{"filepath": image}],
+            }]
+            with open(project.project_file, "w", encoding="utf-8") as handle:
+                json.dump(data, handle)
+
+            restored = Project()
+            restored.load(project.project_dir)
+            recovered = {
+                item["type"]: item["original"]
+                for item in restored.all_files
+            }
+            self.assertEqual(recovered, {"audio": audio, "image": image})
 
     def test_missing_file_entry_survives_resave(self):
         with tempfile.TemporaryDirectory() as root:

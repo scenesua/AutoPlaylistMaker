@@ -1,14 +1,12 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$version = "1.3.0"
+$version = "1.3.1"
 $appName = "AutoPlaylistMaker_v$version"
 $distRoot = Join-Path $PSScriptRoot "dist"
 $bundleDir = Join-Path $distRoot $appName
 $output = Join-Path $bundleDir "$appName.exe"
-$coreOutput = Join-Path $bundleDir "$appName.core.exe"
 $zipOutput = Join-Path $distRoot "${appName}_windows_x64.zip"
-
 $pythonDlls = Join-Path (python -c "import sys; print(sys.prefix)") "DLLs"
 $tclDll = Join-Path $pythonDlls "tcl86t.dll"
 $tkDll = Join-Path $pythonDlls "tk86t.dll"
@@ -25,6 +23,12 @@ $arguments = @(
     "--add-data", "app_splash.png;.",
     "--add-data", "visual_config.json;.",
     "--add-data", "locales;locales",
+    "--add-data", "sound_effect_library/library;sound_effect_library/library",
+    "--add-data", "sound_effect_library/processed;sound_effect_library/processed",
+    "--add-data", "sound_effect_library/manifests/sound_library.json;sound_effect_library/manifests",
+    "--add-data", "sound_effect_library/manifests/category_presets.json;sound_effect_library/manifests",
+    "--add-data", "sound_effect_library/manifests/processed_loops.json;sound_effect_library/manifests",
+    "--add-data", "sound_effect_library/licenses;sound_effect_library/licenses",
     "--add-binary", "$tclDll;.",
     "--add-binary", "$tkDll;.",
     "--collect-all", "imageio_ffmpeg",
@@ -43,6 +47,16 @@ $arguments = @(
     "--exclude-module", "matplotlib",
     "--exclude-module", "IPython",
     "--exclude-module", "notebook",
+    "--exclude-module", "pytest",
+    "--exclude-module", "_pytest",
+    "--exclude-module", "setuptools",
+    "--exclude-module", "pkg_resources",
+    "--exclude-module", "win32com",
+    "--exclude-module", "pythoncom",
+    "--exclude-module", "pywintypes",
+    "--exclude-module", "cryptography",
+    "--exclude-module", "numba.np.ufunc.tbbpool",
+    "--exclude-module", "numba.np.ufunc.omppool",
     "--hidden-import", "analyzer",
     "--hidden-import", "transition",
     "--hidden-import", "video_gen",
@@ -51,6 +65,8 @@ $arguments = @(
     "--hidden-import", "distributor",
     "--hidden-import", "audio_preview",
     "--hidden-import", "audio_pipeline",
+    "--hidden-import", "ambient_library",
+    "--hidden-import", "ambient_engine",
     "--hidden-import", "render_jobs",
     "--hidden-import", "ui_state",
     "--hidden-import", "repeat_settings",
@@ -60,29 +76,24 @@ $arguments = @(
     "--hidden-import", "stage5_render",
     "--hidden-import", "timeline_utils",
     "--hidden-import", "psutil",
-    "app.py"
+    "bootstrap.py"
 )
 
+$ffprobeCommand = Get-Command ffprobe -ErrorAction SilentlyContinue
+if ($ffprobeCommand) {
+    $arguments += @("--add-binary", "$($ffprobeCommand.Source);.")
+} else {
+    throw "ffprobe is required to build a self-contained render validator"
+}
+
 python -m PyInstaller @arguments
-if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller onedir build failed with exit code $LASTEXITCODE"
+$buildExitCode = $LASTEXITCODE
+if ($buildExitCode -ne 0) {
+    throw "PyInstaller onedir build failed with exit code $buildExitCode"
 }
 
 if (-not (Test-Path -LiteralPath $output)) {
     throw "Build completed without output: $output"
-}
-Move-Item -LiteralPath $output -Destination $coreOutput -Force
-Copy-Item -LiteralPath "app_splash.png" -Destination $bundleDir -Force
-
-$csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-if (-not (Test-Path -LiteralPath $csc)) {
-    throw "Windows C# compiler not found: $csc"
-}
-& $csc /nologo /target:winexe /optimize+ /win32icon:app_icon.ico `
-    /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
-    "/out:$output" native_launcher.cs
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output)) {
-    throw "Native launcher build failed with exit code $LASTEXITCODE"
 }
 
 $internalDir = Join-Path $bundleDir "_internal"

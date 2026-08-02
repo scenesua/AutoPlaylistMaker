@@ -32,7 +32,7 @@ class SearchableFontComboBox(tk.Frame):
         self.theme = theme
         self.ui_font = ui_font
         self.popup = None
-        self._outside_bind_id = None
+        self._outside_bindings = []
         self._filter_job = None
         self._visible_fonts = []
         self.button = tk.Button(
@@ -142,9 +142,19 @@ class SearchableFontComboBox(tk.Frame):
         popup.geometry(f"{width}x{height}+{x}+{y}")
         popup.deiconify()
         popup.lift()
-        self._outside_bind_id = root.bind(
-            "<Button-1>", lambda _event: self.close(), add="+"
-        )
+        bind_targets = [root]
+        app_root = self._root()
+        if app_root is not root:
+            bind_targets.append(app_root)
+        self._outside_bindings = [
+            (
+                target,
+                target.bind(
+                    "<Button-1>", lambda _event: self.close(), add="+"
+                ),
+            )
+            for target in bind_targets
+        ]
         self.search.focus_set()
 
     def close(self):
@@ -157,14 +167,12 @@ class SearchableFontComboBox(tk.Frame):
             self._filter_job = None
         if popup and popup.winfo_exists():
             popup.destroy()
-        if self._outside_bind_id:
+        for target, bind_id in self._outside_bindings:
             try:
-                self.winfo_toplevel().unbind(
-                    "<Button-1>", self._outside_bind_id
-                )
+                target.unbind("<Button-1>", bind_id)
             except tk.TclError:
                 pass
-            self._outside_bind_id = None
+        self._outside_bindings = []
 
     def _schedule_filter(self, *_args):
         if self._filter_job:

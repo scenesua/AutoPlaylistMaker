@@ -9,7 +9,7 @@ on:
       tag:
         description: Release tag to create after both builds succeed
         required: true
-        default: v1.3.0
+        default: v1.3.1
 
 permissions:
   contents: write
@@ -18,8 +18,8 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Install dependencies
@@ -31,7 +31,7 @@ jobs:
         run: .\build_windows_onedir.ps1
         shell: pwsh
       - name: Store Windows package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-package
           path: dist/*_windows_x64.zip
@@ -40,8 +40,8 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Install dependencies
@@ -52,7 +52,7 @@ jobs:
       - name: Build
         run: bash build_mac.sh
       - name: Store macOS package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-package
           path: dist/*_macos.zip
@@ -64,8 +64,8 @@ jobs:
       - build-windows
       - build-macos
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: '*-package'
           path: release-assets

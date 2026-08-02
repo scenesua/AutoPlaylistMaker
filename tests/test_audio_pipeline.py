@@ -1,22 +1,102 @@
 import os
 import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import json
 import numpy as np
 import soundfile as sf
 
+import audio_pipeline
 from analyzer import TrackAnalysis
 from audio_pipeline import (
     mix_ambient_over_media, mix_tracks_streaming, normalize_loudness,
 )
 from video_gen import RenderCancelledError, _find_ffmpeg_exe, generate_video
+from ambient_library import SoundLibrary
+from ffmpeg_service import ensure_ffprobe_available
+from render_jobs import validate_media_output
+
+
+@unittest.skipUnless(os.name == "nt", "direct WAV preview is Windows-only")
+class AudioPreviewTests(unittest.TestCase):
+    def test_zero_offset_wav_starts_without_ffmpeg_reencoding(self):
+        from audio_preview import AudioPreviewPlayer
+
+        ready = threading.Event()
+        winsound = SimpleNamespace(
+            SND_FILENAME=1, SND_ASYNC=2, SND_PURGE=4, PlaySound=Mock(),
+        )
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wav:
+            path = wav.name
+        try:
+            player = AudioPreviewPlayer(
+                lambda: self.fail("FFmpeg must not run for direct WAV")
+            )
+            with patch.dict(sys.modules, {"winsound": winsound}):
+                player.play(path, duration=None, on_ready=ready.set)
+                self.assertTrue(ready.wait(1))
+            winsound.PlaySound.assert_any_call(path, 3)
+            self.assertTrue(os.path.exists(path))
+        finally:
+            os.unlink(path)
 
 
 @unittest.skipUnless(_find_ffmpeg_exe(), "ffmpeg is required")
 class AudioPipelineTests(unittest.TestCase):
+    def test_integrated_ambience_keeps_ffmpeg_commands_bounded(self):
+        ffmpeg = _find_ffmpeg_exe()
+        library = SoundLibrary()
+        categories = {
+            category: {"enabled": bool(library.available(category)),
+                       "volume_db": -30.0}
+            for category in ("rain", "thunder", "wind", "water")
+        }
+        settings = {"ambience_mixer": {
+            "enabled": True, "random_seed": 12345,
+            "sources": categories,
+        }}
+        commands = []
+        original_run = audio_pipeline._run
+
+        def record(command, cancel_event=None):
+            commands.append(command)
+            return original_run(command, cancel_event)
+
+        with tempfile.TemporaryDirectory() as root:
+            music = os.path.join(root, "music.wav")
+            output = os.path.join(root, "mixed.wav")
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                "-c:a", "pcm_s16le", music,
+            ], check=True)
+            analysis = SimpleNamespace(
+                filename="music.wav", duration=2, bpm=120, key="C",
+                mode="major", camelot="8B", integrated_lufs=None,
+                true_peak_dbtp=None,
+            )
+            audio_pipeline._run = record
+            try:
+                mix_tracks_streaming(
+                    ffmpeg, [analysis], [{"filepath": music}], output, 0,
+                    audio_settings=settings,
+                )
+            finally:
+                audio_pipeline._run = original_run
+            self.assertGreater(os.path.getsize(output), 1024)
+        self.assertLessEqual(
+            max(sum(item == "-i" for item in command) for command in commands),
+            8,
+        )
+        self.assertTrue(any(
+            "-filter_complex_script" in command for command in commands
+        ))
+
     def test_streaming_mix_and_normalization(self):
         ffmpeg = _find_ffmpeg_exe()
         with tempfile.TemporaryDirectory() as root:
@@ -222,11 +302,19 @@ class AudioPipelineTests(unittest.TestCase):
                 np.array([]), np.empty((0, 0)), np.array([]),
                 22050, 512, np.zeros(11025, dtype=np.float32),
             )
+            process_ids = []
             generate_video(
                 [analysis], audio, output, width=64, height=64,
                 visual_config_path=config_path, fps=5,
+                process_callback=process_ids.append,
             )
+            self.assertEqual(len(process_ids), 1)
+            self.assertGreater(process_ids[0], 0)
             self.assertGreater(os.path.getsize(output), 1024)
+            validated = validate_media_output(
+                output, ensure_ffprobe_available(), 64, 64, .5
+            )
+            self.assertTrue(validated['has_audio'])
             probe = subprocess.run(
                 [ffmpeg, '-hide_banner', '-i', output],
                 capture_output=True, text=True,

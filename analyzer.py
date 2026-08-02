@@ -148,15 +148,23 @@ def compute_energy_profile(y, sr, segment_duration=1.0, rms=None, hop_length=512
     )
 
 
-def analyze_track(filepath):
+def analyze_track(filepath, progress_callback=None):
+    def progress(stage, current, total=8):
+        if progress_callback:
+            progress_callback(stage, current, total)
+
+    progress("decoding", 0)
     y, sr = librosa.load(filepath, sr=22050, mono=True)
+    progress("metadata", 1)
     duration = librosa.get_duration(y=y, sr=sr)
 
     hop_length = 512
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
     rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
+    progress("waveform", 2)
 
     bpm, beat_times = detect_bpm(y, sr)
+    progress("beats", 3)
     key, mode = detect_key(y, sr, chroma=chroma)
     camelot = CAMELOT.get(key + ('m' if mode == 'minor' else ''), '8B')
     energy = compute_energy_profile(
@@ -165,6 +173,7 @@ def analyze_track(filepath):
 
     S = np.abs(librosa.stft(y, hop_length=hop_length))
     stft_times = librosa.frames_to_time(np.arange(S.shape[1]), sr=sr, hop_length=hop_length)
+    progress("frequency", 4)
 
     import os
     filename = os.path.basename(filepath)
@@ -174,6 +183,7 @@ def analyze_track(filepath):
     )
     integrated_lufs = true_peak_dbtp = loudness_range = None
     channels = 1
+    progress("loudness", 5)
     try:
         import soundfile as sf
         channels = int(sf.info(filepath).channels)
@@ -184,6 +194,7 @@ def analyze_track(filepath):
         loudness_range = loudness["loudness_range"]
     except (OSError, RuntimeError, ValueError, KeyError):
         pass
+    progress("cache", 7)
 
     analysis = TrackAnalysis(
         filepath=filepath,
@@ -209,6 +220,7 @@ def analyze_track(filepath):
         channels=channels,
     )
 
+    progress("complete", 8)
     return analysis
 
 
