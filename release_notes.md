@@ -1,4 +1,4 @@
-# 🎵 Auto Playlist Maker v1.3.0
+# 🎵 Auto Playlist Maker v1.3.1
 
 Windows와 macOS 패키지, FFmpeg 설치 스크립트가 포함되어 있습니다.
 
@@ -6,229 +6,268 @@ Windows와 macOS 패키지, FFmpeg 설치 스크립트가 포함되어 있습니
 
 ## 🇰🇷 한국어
 
-1.3.0은 단순한 테마 변경이 아니라, **음원 편집 → 분배 → 클립 구성 → 디자인·효과 → 렌더**의 전체 작업 흐름을 실제 편집 프로그램처럼 다시 정리한 대규모 업데이트입니다.
+1.3.1은 1.3.0 배포 후 확인된 작업 중단 문제와 미리보기·분석·효과 편집 문제를 우선 해결하고, **효과 랙과 환경음 작업 흐름을 실제 편집 프로그램처럼 안정화한 업데이트**입니다.
 
-### ✨ 새로 추가된 기능
+### ✨ 새롭게 추가된 기능
 
-- **파형에서 직접 트림 편집** — 음원의 시작·끝 핸들을 파형 위에서 바로 드래그할 수 있습니다. 최소 길이 제한, 범위 밖 드래그 캡처, Shift/Alt 미세 조절, 볼륨·페이드 설정과 프로젝트 저장을 지원합니다.
-- **더 강력한 수동 분배** — 곡을 그룹 사이로 드래그하고, 그룹 안의 순서를 바꾸고, 그룹 자체도 위아래로 이동할 수 있습니다. 아직 그룹이 없으면 첫 이동 때 `Mix 1`이 자동으로 만들어집니다.
-- **필요한 효과만 추가하는 효과 목록** — 새 프로젝트는 빈 효과 목록으로 시작합니다. `+ 효과 추가` 메뉴에서 카테고리와 검색으로 실제 구현된 효과만 골라 추가할 수 있습니다.
-  - 배경, 앨범 이미지, 로고
-  - 곡 정보, 사용자 텍스트
-  - 비주얼라이저
-  - 페이드, 비트 효과, CRT, 화면 표시 시간
-  - 각 효과 카드는 접기·펼치기, 순서 이동, 개별 섹션 초기화, 삭제를 지원합니다.
-- **전역 오디오 섹션** — 시각 효과와 분리된 전용 오디오 영역에서 음악 마스터 볼륨, 트랙 음량 정규화, 환경음 믹서, 환경음 마스터, True Peak 제한과 실시간 L/R 미터를 조절할 수 있습니다.
-- **트랙별 음량 분석과 정규화** — BS.1770 기준의 Integrated LUFS, True Peak, LRA를 분석해 곡마다 다른 체감 음량을 맞출 수 있습니다. 과도한 증폭과 피크를 제한하는 설정도 함께 제공합니다.
-- **환경음 믹서** — 여러 환경음을 추가하고 각각의 볼륨·페이드·반복을 설정할 수 있습니다. 완성 영상을 여러 번 반복할 때도 마지막까지 끊기지 않도록 전체 타임라인 기준으로 합성됩니다.
-- **두 곡 전환 미리보기** — 곡 경계 앞뒤를 빠르게 확인해 크로스페이드와 전환 결과를 점검할 수 있습니다. 미리보기와 최종 출력은 같은 해상도·FPS·렌더 설정을 공유합니다.
-- **완성 영상 반복 계획** — 반복 횟수를 직접 지정하거나 목표 재생 시간을 입력할 수 있습니다. 예상 반복 수, 최종 길이와 목표 초과 시간을 미리 보여주며, 마지막 반복을 임의로 잘라내지 않습니다.
-- **프로젝트 포맷 v4** — 편집 위치, 음량·페이드, 그룹 순서, 클립, 효과, 전역 오디오, 반복, 렌더 설정과 현재 단계를 함께 저장합니다. 원자적 저장, 미디어 백업, 누락 파일 재연결과 이전 프로젝트 마이그레이션도 지원합니다.
-- **11개 언어** — 한국어, 영어, 일본어, 중국어 간체·번체, 스페인어, 프랑스어, 이탈리아어, 아랍어에 **독일어와 러시아어**를 추가했습니다. 언어를 바꿔도 선택값과 프로젝트 상태가 바뀌지 않도록 내부 ID를 분리했습니다.
-- **두 단계 시작 화면** — Windows에서 실행 직후 투명 네이티브 아이콘 스플래시가 먼저 나타나고, 이어서 현재 작업과 진행률이 보이는 로딩 스플래시가 표시됩니다. 메인 창이 준비되면 자동으로 닫힙니다.
+- **확장된 사용자 텍스트** — 투명도, 외곽선, 배경 상자, 표시 시작·종료 시간과 대상 곡을 설정할 수 있으며 전체 화면 클립 위에서도 유지됩니다.
+- **렌더 작업별 오류 기록** — 각 렌더에 고유 작업 번호와 단계별 로그가 생성되며, 실패 창에서 로그·폴더 열기, 내용 복사와 재시도를 바로 실행할 수 있습니다.
+- **실시간 효과 갱신 복구** — 가벼운 시각 설정은 180ms 이내에 현재 미리보기를 다시 구성하고, 해상도·대상 곡·오디오 구조 변경은 재생 위치를 보존해 안전하게 다시 준비합니다.
 
-### 🎨 UI·UX 개선
+### 🎨 효과 랙 재배치
 
-- **Stage 4 재배치** — 큰 미리보기는 왼쪽, 효과 목록과 세부 설정은 오른쪽에 배치해 결과를 보면서 조정하기 쉬워졌습니다.
-- **디자인/효과와 렌더 단계 분리** — 한 화면에 섞여 있던 디자인 설정과 최종 출력 설정을 Stage 4와 Stage 5로 분리했습니다. 반복 설정은 편집 단계에서 관리하고 렌더 단계에서는 요약만 확인합니다.
-- **전문 소프트웨어형 디자인 시스템** — Noto Sans KR 우선 글꼴, 명확한 정보 위계, 일관된 간격과 패널, 입력 포커스, 비활성·선택·hover 상태를 적용했습니다.
-- **다크·라이트 모드 일관성** — 밝은 모드 상단 바와 Stage 5에 남던 어두운 배경·회색 외곽을 제거했습니다. 삭제·초기화 같은 위험 동작은 빨간 hover, 추가 동작은 초록 hover로 구분했습니다.
-- **반응형 패널과 스크롤** — 최소 창, 최대화, 긴 효과·파일 목록과 빈 상태에서 요소가 겹치거나 잘리지 않도록 패널 크기, 내부 스크롤과 리사이즈 동작을 정리했습니다.
-- **작업 진행 피드백** — 분석, 프로젝트 불러오기, 미리보기와 렌더 작업에 실제 진행 상태와 취소 경로를 표시합니다.
-- **검색형 폰트 선택기** — 시스템 글꼴을 검색하고 키보드로 이동·선택할 수 있으며, 메뉴 밖 클릭과 Esc로 닫을 수 있습니다.
-- **정밀 슬라이더 조작** — Alt+클릭으로 정의된 기본값을 복원하고, 값 표시와 조작 피드백을 개선했습니다.
+- **미리보기 중심 화면** — 미리보기는 왼쪽, 효과 랙은 오른쪽에 고정됩니다. 기본 가로 비율은 약 3:1이며 경계를 직접 드래그해 바꿀 수 있습니다.
+- **크기를 바꿀 수 있는 효과 랙** — 효과 목록과 아래 기본 설정 사이의 경계도 위아래로 조절할 수 있습니다. 기본 상태에서는 효과 목록이 더 넓게 보입니다.
+- **접을 수 있는 기본 설정** — 전역 오디오와 미리보기 해상도 설정을 필요할 때만 펼칠 수 있어 작은 화면에서도 효과 목록을 가리지 않습니다.
+- **정리된 기본 슬롯** — 전역 오디오, 장면 전환, 기본 배경은 기본 슬롯으로 유지하고, 사용자가 추가한 효과는 별도 순서로 관리합니다.
+- **안정적인 효과 설정 창** — 같은 효과의 설정 창이 여러 개 열리지 않으며, 닫았다 다시 열어도 설정과 활성 상태가 유지됩니다.
 
-### 🎶 비주얼라이저·미리보기 개선
+### 🌧️ 하나로 통합된 환경음 효과
 
-- **5가지 비주얼라이저 유지·개선** — EQ 바, 미니멀 파형, 스펙트럼, 원형, 방사형 스타일을 제공합니다.
-- **세부 조절 확대** — 개수, 높이, 간격, 감도, 스무딩, 감쇠, 투명도, 모서리, 글로우, 선 두께, 미러, 반전, 그라데이션, 색상과 X/Y/너비를 조절할 수 있습니다.
-- **실제 오디오 동기화 복구** — 트림 시작점과 곡별 분석 데이터를 정확히 따라가며, 두 곡 전환에서도 각 곡의 파형·FFT 캐시를 따로 사용합니다.
-- **캐시 안정성 개선** — 파일명이 같은 다른 음원이 충돌하지 않도록 하고, 구형 프로젝트의 불완전한 분석 캐시는 필요한 파일만 다시 분석합니다.
-- **클립 미리보기 개선** — 이미지·영상 썸네일과 리사이즈 가능한 미리보기 영역을 제공하고, 사용자가 조절한 분할 비율을 복원합니다.
+- 환경음은 비·천둥·바람을 각각 효과로 추가하는 방식이 아니라, 효과 랙의 **환경음 슬롯 하나**로 관리합니다.
+- 환경음 설정 안에서 비, 천둥, 바람, 파도, 시냇물, 모닥불, 숲, 새소리, 귀뚜라미, 카페, 도시, 기차, 선풍기, 환풍기 등의 종류를 독립적으로 켜고 음량을 조절할 수 있습니다.
+- 실제 WAV·OGG 파일은 사용자에게 나열하지 않고, 내부에서 순환·무작위 시작·크로스페이드와 사건형 배치를 조합해 장시간 반복감을 줄입니다.
+- 음악과 환경음은 서로 다른 오디오 버스로 처리됩니다. 곡 정규화, 곡별 페이드, 곡 사이 크로스페이드와 반복 경계가 환경음을 끊지 않습니다.
+- 여러 종류를 동시에 사용해도 Windows 명령줄 길이 제한에 걸리지 않도록 작업을 작은 단위로 나누고 filter script·concat 목록·중간 환경음 버스를 사용합니다.
 
-### 🐛 수정된 문제
+### 🎬 미리보기와 렌더 안정화
 
-- FFmpeg `asplit`의 `music_bus_main` 출력이 연결되지 않아 미리보기가 실패하던 문제
-- 트림 드래그를 끝낸 뒤에도 핸들이 마우스를 따라가던 문제
-- 빈 그룹 또는 그룹이 없는 상태에서 첫 곡 이동이 막히던 문제
-- 언어 변경 후 코덱·비주얼라이저·반복 선택의 의미가 달라지던 문제
-- 패키지에서 미리보기와 최종 렌더가 서로 다른 FFmpeg를 찾던 문제
-- 메타데이터 자동 저장이 기존 분석 캐시를 덮어쓰던 문제
-- 렌더 큐의 코덱 표시가 다른 작업의 값으로 바뀌던 문제
-- 앱 종료 후 미리보기·렌더 하위 프로세스가 남던 문제
-- 밝은 모드 버튼 대비, 상단 내비게이션 색상, Stage 5 회색 테두리 문제
-- 반복 영상 전체 길이에 환경음이 이어지지 않던 문제
+- **두 곡 미리보기가 기본값** — 현재 곡과 다음 곡의 경계를 중심으로 크로스페이드와 장면 전환을 확인할 수 있습니다.
+- **독립적인 미리보기 품질** — 최종 출력 해상도를 바꾸지 않고 낮음·중간·높음·사용자 지정 미리보기 해상도를 선택할 수 있습니다.
+- **실제 준비 상태 표시** — 오디오 믹스, 효과 준비, 첫 프레임과 재생 준비가 완료될 때까지 로딩 상태를 유지하고 실패 원인을 표시합니다.
+- **더 빠른 첫 재생** — 이미 완성된 WAV 미리보기는 다시 FFmpeg로 변환하지 않고 바로 재생합니다.
+- **확실한 렌더 완료 판정** — 인코더 프로세스가 끝난 것만으로 성공 처리하지 않고, FFprobe로 영상·오디오 스트림과 길이를 확인한 뒤 완료로 표시합니다.
+- 반복 횟수와 목표 재생 시간은 최종 렌더 단계에서 관리하며, 기존 프로젝트의 반복 설정도 그대로 복원합니다.
 
-### ⚠️ 릴리스 후 확인된 주요 문제
+### 📊 분석과 프로젝트 복구
 
-아래 문제는 v1.3.0 배포 후 일부 작업 흐름에서 확인됐으며, 현재 정확한 재현 범위를 점검하고 있습니다. 프로젝트 진행을 막을 수 있는 항목부터 v1.3.1에서 우선 수정할 예정입니다.
+- 분석 진행 창은 전체 작업이 실제로 끝나거나 사용자가 취소할 때까지 유지됩니다.
+- 현재 파일, 전체 파일 수, 파형·음량 등 내부 분석 단계를 따로 보여줍니다.
+- 파일 크기나 수정 시간이 바뀌면 오래된 분석 캐시를 자동으로 무효화합니다.
+- 이전 저장 오류로 최상위 파일 목록과 분석 캐시가 비어 있어도, 영상 그룹에 남은 음원·이미지 경로에서 프로젝트를 복구하고 필요한 음원만 다시 분석합니다.
+- 실제 `short test 2`  프로젝트의 음원 3개와 이미지 4개를 복구하고, 분석·두 곡 미리보기까지 완료했습니다.
 
-- 다크 모드와 라이트 모드를 서로 전환한 뒤 일부 화면 요소가 사라지거나 다시 그려지지 않을 수 있습니다.
-- 새 프로젝트에서 프로젝트 이름을 확정하지 못하거나 저장이 정상적으로 완료되지 않을 수 있습니다.
-- 상단의 `다음` 동작이 반응하지 않아 다음 작업 단계로 이동하지 못할 수 있습니다.
-- 음원 분석을 시작하면 진행 상황을 보여주는 창이 먼저 닫히고, 분석만 백그라운드에서 계속되어 진행 상태와 취소 여부를 확인하기 어려울 수 있습니다.
+### ⚡ 시작과 패키지 구조
 
-### 📦 다운로드 및 설치
+- Windows는 하나의 사용자용 EXE만 제공합니다. 별도의 launcher/core EXE로 나뉘지 않습니다.
+- Tk가 준비되기 전에는 같은 프로세스의 네이티브 시작 화면을 표시해 앱이 실행 중임을 더 일찍 확인할 수 있습니다.
+- 분석기, 영상 렌더러, 디자인·렌더 단계와 무거운 라이브러리는 실제로 필요한 단계에 들어갈 때만 불러옵니다.
+- FFprobe와 앱 아이콘, 내장 환경음 라이브러리를 onedir 패키지에 포함합니다.
 
-- **Windows**: `AutoPlaylistMaker_v1.3.0_windows_x64.zip`
-  1. ZIP 압축을 풉니다.
-  2. FFmpeg가 없다면 `setup.bat`을 한 번 실행합니다.
-  3. 폴더 안의 `AutoPlaylistMaker_v1.3.0.exe`를 실행합니다.
-- **macOS**: `AutoPlaylistMaker_v1.3.0_macos.zip`
-  1. ZIP 압축을 풀고 `.app`을 실행합니다.
-  2. FFmpeg가 없다면 터미널에서 `bash setup_mac.sh`를 실행합니다.
-  3. 서명되지 않은 앱 경고가 나오면 Finder에서 앱을 우클릭한 뒤 **열기**를 선택합니다.
+### 🐛 수정된 주요 문제
 
-### ✅ 검증 및 참고
+- 다른 앱을 확인한 뒤 APM으로 돌아오면 프로젝트 로딩·음원 분석 진행 창이 메인 창 뒤로 사라지던 문제
+- 새 프로젝트 이름과 기본 저장 경로가 잘못 처리되던 문제
+- 상단 `다음` 버튼이 현재 작업 상태와 맞지 않게 비활성화되던 문제
+- 분석 진행 창이 첫 파일 또는 작업 도중 사라지고 분석만 계속되던 문제
+- worker thread가 Tk UI를 직접 갱신하던 문제
+- 효과 래프와 미리보기 위치가 바뀌거나 설정 창이 중복으로 열리던 문제
+- 슬라이더 트랙 클릭·노브 드래그·Alt+클릭 초기화가 일부 화면에서 동작하지 않던 문제
+- 전역 오디오 아래 설정이 효과 목록 공간을 과도하게 잡아 먹던 문제
+- 미리보기 로딩이 끝나지 않거나 완료 후에도 “연결 중”으로 남던 문제
+- 이전의 미리보기 frame/audio callback이 새 상태를 덮어쓰던 문제
+- 환경음 여러 종류를 사용할 때 `WinError 206`이 발생하던 문제
+- 결과 파일이 비어 있거나 손상됐는데도 렌더가 완료로 표시되던 문제
+- 패키지에서 FFprobe를 찾지 못해 완료 검증이 실패하던 문제
+- 종료 후 타이머·미리보기·렌더 관련 작업이 남던 문제
 
-- 자동 테스트 **63개 통과**
-- 11개 locale key·placeholder 검사 **0 errors / 0 warnings**
-- Windows와 macOS GitHub Actions 빌드 및 ZIP 생성 성공
-- 최소·기본·대형 창, 다크·라이트 모드, 긴 목록과 빈 상태 레이아웃 확인
-- 대형 오디오·과학 라이브러리를 처음 불러오는 콜드 스타트는 PC 환경에 따라 시간이 걸릴 수 있습니다.
+### 📦 Windows 설치
+
+1. `AutoPlaylistMaker_v1.3.1_windows_x64.zip`을 원하는 폴더에 압축 해제합니다.
+2. 폴더 안의 `AutoPlaylistMaker_v1.3.1.exe`를 실행합니다.
+3. 폴더 안의 `_internal`과 환경음 라이브러리 파일은 EXE와 함께 두세요.
+
+### ✅ 검증
+
+- 자동 테스트 **116개 통과**(환경 제한 21개 skip)
+- 11개 locale key·placeholder 검사 **0 errors / 0 warnings**, Ruff F/B, py_compile, pip check 통과
+- 네 해상도 preview/output 픽셀 비교 및 추가 해상도(3840×2160~1080×1080) 실제 MP4 비교 통과
+- 환경음 10분 실제 렌더 600.000초, 120초 청크 경계 무음·peak·WinError 발생 없음
+- `short test 2` 실프로젝트 복구 · 분석 3/3 · 두 곡 미리보기 준비 완료
+- Windows 최종 onedir/ZIP 빌드 · 단일 EXE · 실행 → 정상 종료 후 잔여 프로세스 0
+- 자세한 검증 이력은 `docs/versions/1.3.1/TEST_RESULTS.md` 참고
+
+### ⚠️ 참고
+
+- 첫 실행은 Windows의 파일 검사와 Tcl/Tk 초기화 때문에 PC 환경에 따라 시간이 걸릴 수 있습니다. 시작 화면이 표시된 뒤 메인 창 준비가 계속됩니다.
+- macOS 앱과 지원 GPU별 하드웨어 인코더는 해당 환경에서 별도 검증이 필요합니다.
+- `forest`, `singing bowl`은 이번 내장 라이브러리에 원본이 없어 10분 실제 검증에서 제외됩니다.
 
 ---
 
 ## 🇺🇸 English
 
-Version 1.3.0 is a major workflow update across music editing, distribution, clip design, effects, global audio, project persistence, and rendering—not just a visual refresh.
+Version 1.3.1 is a stability-focused release that addresses the workflow-blocking issues found in 1.3.0 and stabilizes the effect rack and ambience workflow.
 
 ### ✨ New Features
 
-- **Waveform trim editing** — Drag in/out handles directly on the waveform, with minimum-length protection, captured dragging outside the control, Shift/Alt fine adjustment, volume/fade controls, and project persistence.
-- **Expanded manual distribution** — Move tracks between groups, reorder tracks within a group, reorder whole groups, and automatically create `Mix 1` on the first move when no group exists.
-- **Add-only effects workflow** — New projects start with no effect cards. A searchable categorized picker exposes only implemented effects: background, album art, logo, track information, custom text, visualizer, fade, beat effects, CRT, and visibility timing. Cards can be collapsed, reordered, reset by section, or removed.
-- **Dedicated global audio section** — Control music master level, track normalization, ambient mixing, ambient master, True Peak limiting, and real-time L/R meters independently from visual effects.
-- **Per-track loudness analysis** — BS.1770 Integrated LUFS, True Peak, and LRA measurements help match perceived loudness while configurable gain and peak limits prevent excessive amplification.
-- **Ambient sound mixer** — Add multiple ambient tracks with per-item volume, fades, and looping. Ambient audio now continues across the complete repeated video timeline.
-- **Two-track transition preview** — Quickly inspect the area around a song boundary. Preview and final render share resolution, FPS, and renderer state.
-- **Final-video repeat planning** — Repeat by count or target duration, with an estimated count, final length, and overrun shown before rendering. The last repetition is never silently truncated.
-- **Project format v4** — Saves trim, volume, fades, group order, clips, effects, global audio, repeat, render settings, and the current stage. Atomic saves, media backup, missing-file relinking, and migration from older projects are included.
-- **11 languages** — German and Russian join Korean, English, Japanese, Simplified/Traditional Chinese, Spanish, French, Italian, and Arabic. Stable internal IDs keep settings unchanged when the UI language changes.
-- **Two-stage Windows startup** — An immediate transparent native icon splash hands off to a progress/status loading splash, which closes when the main window is ready.
+- **Expanded user text** — Set transparency, outline, background box, display start/end times and target track; text is preserved over fullscreen clips.
+- **Per-job render error logs** — Each render gets a unique job ID with per-step logs; the non-modal error window offers open log, open folder, copy text, and retry.
+- **Live effect refresh restored** — Light visual changes rebuild the current preview within 180ms; resolution/target-track/audio-structure changes are re-prepared safely while preserving playback position.
 
-### 🎨 UI/UX Improvements
+### 🎨 Effect Rack and Layout
 
-- Stage 4 now uses a large preview on the left and the effects inspector on the right.
-- Design/effects and final rendering are separated into Stage 4 and Stage 5.
-- A consistent professional design system improves typography, hierarchy, spacing, panels, focus, selection, hover, disabled, and validation states.
-- Light mode no longer leaves dark navigation surfaces or the gray Stage 5 outer gutter.
-- Responsive panels, independent scrolling, long lists, and empty states behave cleanly from the minimum window size to maximized layouts.
-- Real progress and cancellation feedback is shown for analysis, project loading, preview, and rendering.
-- The searchable font picker supports keyboard navigation, outside-click close, and Esc.
-- Alt-click restores defined slider defaults.
+- A fixed split keeps the preview on the left and the effect rack on the right (about 3:1 by default, draggable).
+- The boundary between the rack and its settings is vertically adjustable; text/rack gets more room by default.
+- Global audio and preview resolution settings are collapsible so they never hide the effect list on small windows.
+- Global audio, scene transition, and default background stay fixed slots; added effects keep their own order.
+- Effect settings windows are singletons — no duplicates, and settings/active state persist across close/open.
 
-### 🎶 Visualizer and Preview Improvements
+### 🌧️ Unified Ambience Effect
 
-- Five visualizer styles: EQ bars, minimal waveform, spectrum, circles, and radial.
-- Expanded controls for count, height, gap, sensitivity, smoothing, decay, opacity, corner radius, glow, line width, mirror, inversion, gradient, color, and position.
-- Visualizers now follow the correct trimmed source time and keep separate waveform/FFT state for each track during transitions.
-- Cache keys no longer collide for different files with the same filename; incomplete legacy analysis is rebuilt only where needed.
-- Image/video thumbnails and a resizable clip preview preserve the chosen split ratio.
+- Rain, thunder, wind, etc. are no longer separate effects; they live in a single ambience effect in the rack.
+- Enable and adjust per-type volume for rain, thunder, wind, waves, stream, fire, forest, birds, crickets, cafe, city, train, fan, ventilator inside the ambience settings.
+- Real WAV/OGG files are not listed; an internal engine combines rotation, randomized starts, crossfades, and event placement to reduce long-run repetition.
+- Music and ambience ride independent audio buses, so normalization, per-track fades, crossfades, and repeat boundaries never cut ambience.
+- Long mixes are chunked (120s) and batched (max 8 inputs) with filter scripts and concat lists to avoid `WinError 206`.
+
+### 🎬 Preview and Render Stability
+
+- Default preview covers two tracks and their boundary, so crossfades and transitions are easy to inspect.
+- Preview quality is independent from the final output resolution (auto/low/medium/high/custom).
+- Loading state persists and lists failure causes until audio mix, effect preparation, first frame and playback are ready.
+- Completed WAV previews play immediately without reconverting.
+- A render is marked complete only after FFprobe verifies the file size, video/audio streams, resolution and duration — not just because the encoder exited.
+- Repeat count/target playback time are managed at the final render stage, and existing repeat settings are restored.
+
+### 📊 Analysis and Project Recovery
+
+- The analysis progress window stays until the whole job finishes or you cancel it; current file, total file count and internal stages are shown.
+- Changed file size or mtime automatically invalidates stale analysis cache.
+- If the top-level file list and cache are empty after a save error, the project is rebuilt from remaining group media paths and only missing sources are re-analyzed.
+- The real `short test 2` project (3 audio, 4 images) was recovered, analyzed (3/3) and previewed across two tracks.
+
+### ⚡ Startup and Packaging
+
+- Windows ships a single user EXE with no separate launcher/core executables.
+- A native splash from the same process shows the app is running before Tk is ready.
+- Lazy loading keeps the analyzer, video renderer and design/render stages plus large libraries until they are actually needed.
+- FFprobe, the app icon and the bundled ambience library are included in the onedir package.
 
 ### 🐛 Fixes
 
-- Unconnected FFmpeg `asplit` output causing preview preparation to fail
-- Trim handles continuing to follow the pointer after release
-- First move failing when groups were empty or absent
-- Codec, visualizer, and repeat meanings changing after a locale switch
-- Preview and render resolving different FFmpeg executables in packaged builds
-- Metadata autosave overwriting analysis cache entries
-- Render queue codec labels capturing another job's value
-- Preview/render child processes remaining after application shutdown
-- Light-mode button contrast, navigation colors, and Stage 5 gray border
-- Ambient audio ending before the full repeated video timeline
+- Analysis/loading progress windows disappearing behind the main window after returning to APM
+- New project name handling and default save path
+- Top-level **Next** being disabled inconsistently with the current state
+- The analysis progress window closing while analysis kept running in the background
+- Workers calling Tk/UI directly
+- Effect rack/preview layout being swapped or duplicate settings windows
+- Slider track click, knob drag and Alt+click reset not working in some views
+- Settings under global audio taking excessive space
+- Preview errors remaining stuck on “connecting” after loading finished
+- Stale preview frame/audio callbacks overwriting the new preview state
+- `WinError 206` when many ambience kinds were used at once
+- Empty/corrupt output files reported as completed renders
+- FFprobe not found in the package, failing completion validation
+- Cleanup missing for timers/preview/render after shutdown
 
-### ⚠️ Known Issues Identified After Release
+### 📦 Windows Install
 
-The following issues were reported in some v1.3.0 workflows after release. Their exact scope is being reproduced, and fixes that block normal project progression will take priority in v1.3.1.
+1. Extract `AutoPlaylistMaker_v1.3.1_windows_x64.zip` to the folder of your choice.
+2. Run `AutoPlaylistMaker_v1.3.1.exe` inside it.
+3. Keep the `_internal` folder and the ambience library files next to the EXE.
 
-- Switching between dark and light modes may leave some controls or panels missing until the affected view is rebuilt.
-- A new project may fail to accept its project name or complete a save.
-- The top-level **Next** action may not advance to the following workflow stage.
-- The analysis progress window may close too early while analysis continues in the background, leaving progress and cancellation state unavailable.
+### ✅ Validation
 
-### 📦 Downloads and Installation
+- 116 automated tests passed (21 environment-limited cases skipped)
+- 11-locale validation: 0 errors / 0 warnings; Ruff F/B, py_compile, pip check passed
+- Multi-resolution preview/output pixel comparisons and visual MP4 checks (11 sizes) passed
+- 10-minute real ambience render exact 600.000s with no silent/peak/over-run at 120s chunk boundaries
+- `short test 2` recovery: 3/3 audio, second-track preview ready
+- Final Windows onedir/ZIP build, single EXE, clean GUI start, 0 leftover processes after normal exit
+- See `docs/versions/1.3.1/TEST_RESULTS.md` for the full history
 
-- **Windows**: Extract `AutoPlaylistMaker_v1.3.0_windows_x64.zip`, run `setup.bat` if FFmpeg is missing, then launch `AutoPlaylistMaker_v1.3.0.exe`.
-- **macOS**: Extract `AutoPlaylistMaker_v1.3.0_macos.zip`, run `bash setup_mac.sh` if FFmpeg is missing, then open the `.app`. If macOS warns about an unsigned app, right-click it in Finder and choose **Open**.
+### ⚠️ Notes
 
-### ✅ Validation and Notes
-
-- 63 automated tests passed
-- 11-locale key and placeholder validation: 0 errors / 0 warnings
-- Windows and macOS GitHub Actions builds completed successfully
-- Minimum, standard, and large layouts checked in light/dark modes with long lists and empty states
-- The first cold start can take longer while large audio and scientific libraries are loaded.
+- The first launch can be slow depending on the PC due to SmartScreen/SmartScreen file checks and Tcl/Tk initialization; the splash then the main window continue loading.
+- macOS app and GPU encoders (NVENC/QSV/AMF) still need validation on the target hardware.
+- `forest` and `singing bowl` have no bundled source assets, so they were excluded from long-duration real playback tests.
 
 ---
 
 ## 🇯🇵 日本語
 
-1.3.0 は見た目だけではなく、音源編集、曲の分配、クリップ構成、デザイン・エフェクト、グローバルオーディオ、保存、レンダーまでの作業全体を改善した大型アップデートです。
+1.3.1 は 1.3.0 の公開後に確認された作業を止める問題やプレビュー・分析・エフェクト編集の問題を優先的に修正し、エフェクト ラックと環境音の作業フローを安定化したアップデートです。
 
 ### ✨ 新機能
 
-- **波形上でのトリム編集** — 開始・終了ハンドルを直接ドラッグできます。最小長、範囲外ドラッグ、Shift/Alt の微調整、音量・フェード、プロジェクト保存に対応しました。
-- **手動分配の強化** — 曲をグループ間で移動し、グループ内の順番とグループ自体の順番を変更できます。グループがない場合は最初の移動で `Mix 1` を自動作成します。
-- **追加式エフェクト一覧** — 新規プロジェクトは空の一覧で始まります。検索可能なカテゴリメニューから、背景、アルバム画像、ロゴ、曲情報、ユーザーテキスト、ビジュアライザー、フェード、ビート効果、CRT、表示時間を追加できます。カードごとの折りたたみ、移動、セクション初期化、削除に対応します。
-- **グローバルオーディオ** — 音楽マスター、トラック音量正規化、環境音ミキサー、環境音マスター、True Peak、リアルタイム L/R メーターを独立した領域で調整できます。
-- **トラック別ラウドネス解析** — BS.1770 の Integrated LUFS、True Peak、LRA を解析し、増幅量とピークを制限しながら曲ごとの体感音量をそろえられます。
-- **環境音ミキサー** — 複数の環境音に個別の音量、フェード、ループを設定できます。完成動画を繰り返しても最後まで連続して合成されます。
-- **2曲トランジションプレビュー** — 曲の境界前後を素早く確認できます。プレビューと最終出力は同じ解像度、FPS、レンダー状態を共有します。
-- **完成動画の繰り返し計画** — 回数または目標時間を指定し、予想回数、最終時間、超過時間を事前に確認できます。最後の繰り返しを無断で切りません。
-- **プロジェクト形式 v4** — トリム、音量、フェード、グループ順、クリップ、エフェクト、グローバルオーディオ、繰り返し、レンダー設定、現在の段階を保存します。アトミック保存、メディアバックアップ、欠落ファイルの再リンク、旧形式の移行にも対応します。
-- **11言語** — 既存9言語にドイツ語とロシア語を追加しました。表示言語を変更しても設定の意味が変わらない安定した内部 ID を使用します。
-- **Windows 2段階起動** — 透明なネイティブアイコンをすぐに表示し、進行率と作業内容を表示するローディング画面を経てメイン画面へ移行します。
+- **テキスト効果の拡張** — 透明度・枠線・背景ボックス・表示開始/終了時間・対象曲を設定でき、フル画面クリップの上でも維持されます。
+- **レンダー単位のエラーログ** — 各レンダーにユニークな、ジョブ ID とステップ別ログを生成。失敗ウィンドウでログ・フォルダを開く、コピー、再試行をすぐ実行できます。
+- **ライブ更新の復旧** — 軽い視覚設定は 180ms 以内にプレビューを再構成し、解像度・対象曲・オーディオ構造の変更は再生位置を保って安全に再準備します。
 
-### 🎨 UI・UX 改善
+### 🎨 エフェクトラック・レイアウト
 
-- Stage 4 は左側に大きなプレビュー、右側にエフェクト一覧と設定を配置しました。
-- デザイン・エフェクトと最終レンダーを Stage 4 / Stage 5 に分離しました。
-- タイポグラフィ、情報階層、余白、パネル、フォーカス、選択、hover、無効状態を統一しました。
-- ライトモードの暗いナビゲーション背景と Stage 5 の灰色外枠を修正しました。
-- 最小サイズ、最大化、長い一覧、空の状態でもパネルとスクロールが重ならないよう改善しました。
-- 解析、プロジェクト読み込み、プレビュー、レンダーに実際の進行状況とキャンセル操作を表示します。
-- 検索型フォント選択と Alt+クリックによるスライダー初期値復元を追加しました。
+- プレビューを左、エフェクトラックを右に固定（既定で約 3:1、境界はドラッグで調整）。
+- ラックと下部設定の境界も縦に調整可能。既定ではラックが広く表示されます。
+- グローバルオーディオとプレビュー解像度設定は折りたたみ式で、小画面でもリストを隠しません。
+- グローバルオーディオ・シーン選択・既定背景は固定スロットとして、ユーザーが追加したエフェクトは別の順序で管理します。
+- 同じエフェクトの設定ウィンドウは重複しません。閉じても設定と有効状態は保持されます。
 
-### 🎶 ビジュアライザー・プレビュー改善
+### 🌧️ アンビエンス効果（1つに統合）
 
-- EQバー、ミニマル波形、スペクトラム、サークル、ラジアルの5種類を提供します。
-- 個数、高さ、間隔、感度、スムージング、減衰、透明度、角丸、グロウ、線幅、ミラー、反転、グラデーション、色、位置を調整できます。
-- トリム開始位置と曲ごとの解析データに正しく同期し、2曲の切り替えでも波形・FFT状態を分離します。
-- 同名ファイルのキャッシュ衝突と旧プロジェクトの不完全な解析キャッシュを修正しました。
-- 画像・動画サムネイルとサイズ変更可能なクリッププレビューの分割比率を保存します。
+- 雨・雷・風などを別々のエフェクトにするのではなく、ラックの**アンビエンススロット 1 つ**で管理します。
+- 雨・雷・風・波・小川・焚き火・森・風・鳥・コオロギ・カフェ・都市・電車・扇風機などを個別にオン/音量調整できます。
+- 実際の WAV/OGG は表示せず、内部でループ・ランダム開始・クロスフェードを組み合わせて高画 … 長い再生の飽きを減らします。
+- 音楽と環境音は独立したオーディオ バス。ノーマライズ・曲フェード・クロスフェード・反復境界が環境音を切らない。
+- 長いコマンドは 120 秒チャンク・8 入力バッチに分割し、filter script と concat リストで `WinError 206` を防止します。
 
-### 🐛 修正
+### 🎬 プレビュー・レンダーの安定化
 
-- FFmpeg `asplit` の未接続出力によるプレビュー準備失敗
-- ドラッグ終了後もトリムハンドルがカーソルを追い続ける問題
-- 空のグループやグループなしの状態で最初の移動が失敗する問題
-- 言語変更後にコーデック、ビジュアライザー、繰り返し設定の意味が変わる問題
-- パッケージ内でプレビューとレンダーが別の FFmpeg を参照する問題
-- メタデータ自動保存が解析キャッシュを上書きする問題
-- 終了後にプレビュー・レンダーの子プロセスが残る問題
-- ライトモードのボタン視認性、上部ナビゲーション、Stage 5 の灰色枠
-- 環境音が完成動画の繰り返し全体まで続かない問題
+- 既定は 2 つの再生（現在+次）の境界でクロスフェードとシーン選択を確認できます。
+- 最終出力解像度と独立した準備品質（auto/low/medium/high/custom）。
+- オーディオ・エフェクト・初回フレーム・再生準備が終わるまでローディングを維持し、失敗原因を表示。
+- 完成済み WAV は再変換せず即時再生。
+- エンコード処理が終わったからだけでなく FFprobe で映像・音声ストリームと長さを確認してから完了と判定。
+- 反復回数と再生時間の設定は最終レンダーで管理し、既存設定も復元。
 
-### ⚠️ リリース後に確認された主な問題
+### 📊 分析とプロジェクト復旧
 
-以下は v1.3.0 の公開後、一部の作業フローで報告された問題です。現在、正確な再現範囲を確認しており、通常のプロジェクト進行を妨げる項目から v1.3.1 で優先的に修正します。
+- 分析ウィンドウは全作業が終わる、またはキャンセルされるまで維持し、現在ファイル・総数・内部分析段階を表示。
+- ファイルサイズや更新時刻が変わると古い分析キャッシュを自動的に無効化。
+- 保存エラーでファイル一覧/キャッシュが空でも、残っているグループから再構築し必要な音源だけ再分析。
+- 実際の `short test 2` 提案（音声 3・画像 4）を復旧し、分析 3/3・第 2 プレビューまで完了。
 
-- ダークモードとライトモードを切り替えた後、一部の操作項目やパネルが表示されなくなる場合があります。
-- 新規プロジェクトでプロジェクト名を確定できない、または保存が完了しない場合があります。
-- 上部の「次へ」が反応せず、次の作業ステージへ進めない場合があります。
-- 音源解析中に進行状況ウィンドウが先に閉じ、解析だけがバックグラウンドで続くため、進行状況やキャンセル状態を確認できない場合があります。
+### ⚡ 起動・パッケージ
 
-### 📦 ダウンロードとインストール
+- Windows は単一のユーザー EXE。launcher/core で別れません（ビルド 2 重化も解消）。
+- Tk が準備される前から同一プロセスでネイティブ スプラッシュを表示。
+- 分析器・映像レンダラー・デザイン/レンダー段階と重いライブラリは必要な時だけロード。
+- FFprobe とアプリアイコン、環境音済みライブラリを onedir に同梱。
 
-- **Windows**: `AutoPlaylistMaker_v1.3.0_windows_x64.zip` を展開し、FFmpeg がない場合は `setup.bat` を実行してから `AutoPlaylistMaker_v1.3.0.exe` を起動してください。
-- **macOS**: `AutoPlaylistMaker_v1.3.0_macos.zip` を展開し、FFmpeg がない場合は `bash setup_mac.sh` を実行して `.app` を開いてください。未署名アプリの警告が出る場合は Finder で右クリックして **開く** を選択します。
+### 🐛 主な修正
 
-### ✅ 検証と注意
+- 他アプリから戻るとプロジェクト読み込み・分析ウィンドウが消える問題
+- 新規プロジェクト名と既定保存先の誤処理
+- 上部「次へ」が現在の状態と合わず無効になる問題
+- 分析ウィンドウが途中で閉じるのに分析が続く問題
+- worker が Tk/UI を直接更新する問題
+- ラックとプレビューの位置入れ替え・ウィンドウ二重表示
+- 一部のスライダーでトラッククリック・ドラッグ・Alt+クリック初期化が動かない問題
+- グローバルオーディオ下の設定がリストを圧迫する問題
+- プレビュー読み込みが終わらない、終了後も「接続中」問題
+- 古い frame/audio コールバックが新状態を上書きする問題
+- 複数系統の環境音時の `WinError 206`
+- 空/壊れた出力が完了と 記録される問題
+- パッケージ内で FFprobe が見つからず完了検証が失敗する問題
+- 終了後のタイマー・プレビュー・レンダーの残存
 
-- 自動テスト 63件成功
-- 11言語の key・placeholder 検査: 0 errors / 0 warnings
-- Windows / macOS の GitHub Actions ビルド成功
-- 最小・標準・大型画面、ライト・ダーク、長い一覧と空状態を確認
-- 大きなオーディオ・科学計算ライブラリを最初に読み込む際は、環境によって起動に時間がかかる場合があります。
+### 📦 Windows インストール
+
+1. `AutoPlaylistMaker_v1.3.1_windows_x64.zip` を任意のフォルダに展開します。
+2. フォルダ内の `AutoPlaylistMaker_v1.3.1.exe` を実行します。
+3. `_internal` フォルダと環境音ライブラリは EXE と一緒に置いてください。
+
+### ✅ 検証
+
+- 自動テスト 116 件成功（環境制限 21 件スキップ）
+- 11 言語 key/placeholder 一致：0 errors / 0 warnings、Ruff F/B・py_compile・pip check 通過
+- プレビュー・出力のピクセル比較と 11 サイズの実 MP4 比較通過
+- 環境音 10 分実レンダー 600.000 秒で 120s チャンク境界にも無音・ピーク違反なし
+- `short test 2` 復旧：音声 3/3・第 2 プレビュー
+- Windows onedir/ZIP 単一 EXE、必要な GUI 起動、終了後の残存プロセス 0
+
+### ⚠️ 注意
+
+- 初回起動はファイルとしての検証と Tcl/Tk 初期化 のためマシンにより時間がかかります。スプラッシュ表示後にメインウィンドウが続きます。
+- macOS アプリと GPU エンコーダ（NVENC/QSV/AMF）は実機での検証が必要です。
+- 組み込み元音源を持たない `forest` / `singing bowl` は、今回の長期実再生検証から除外しています。

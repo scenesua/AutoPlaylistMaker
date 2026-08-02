@@ -37,3 +37,6 @@ splash.png
 
 # External
 title_generator.py
+
+# Internal docs (kept local only)
+docs/

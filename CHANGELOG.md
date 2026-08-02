@@ -1,6 +1,62 @@
 # Changelog
 
-버전별 상세 기록은 [`docs/VERSION_INDEX.md`](docs/VERSION_INDEX.md)를 기준으로 한다.
+버전별 상세 기록은 `docs/VERSION_INDEX.md`를 기준으로 한다.
+
+## 1.3.1 - 2026-08-02
+
+1.3.0 배포 후 확인된 작업 중단·분석·미리보기 회귀를 수정하고, 효과 랙·환경음·렌더 완료 판정을 안정화한 릴리스다.
+
+### Added
+
+- 효과 랙 재배치: 미리보기 3 : 랙 1 분할, 랙/설정 세로 조절, 접이식 기본 설정, 효과 설정 창 singleton
+- 통합 환경음 효과(`ambience_mixer`): 비·천둥·바람 등 14종을 단일 슬롯으로 관리, 배치·볼륨만 저장
+- 사용자 텍스트 효과 확장(투명도·외곽선·배경·시간·대상 곡)
+- 렌더 작업별 job ID·단계별 로그·비모달 오류 창(로그/폴더 열기, 복사, 재시도)
+- WAV 완성본 즉시 재생, FFprobe 기반 렌더 완료 판정
+
+### Changed
+
+- 분석 진행 창을 worker 종료까지 유지하고 실제 단계·파일 진행률 표시
+- 준비 대상 미리보기 품질을 최종 출력 해상도와 분리
+- 미리보기 기본 범위를 두 곡으로 변경
+- Windows 단일 EXE onedir 구조로 통합(launcher/core 이 분리 제거)
+- heavy import 지연(분석기, NumPy, Stage 4/5)과 시작 스플래시 최적화
+
+### Fixed
+
+- 프로젝트 이름·저장 경로 회귀
+- 분석 진행 창 조기 종료·worker의 Tk 직접 호출
+- `다음` 버튼 활성화 상태 회귀
+- 슬라이더 좌클릭/드래그·Alt+클릭 초기화
+- `WinError 206` 환경음 다중 종류 렌더
+- 빈/손상 산출물이 완료로 표시되는 문제
+- 전환 이후 FFprobe 미탐지로 완료 검증 실패
+- App import 시간 단축 · 시작 시간 개선
+
+### Fixed (v1.3.0 후보 회귀 포함)
+
+- 폼백 그룹에서 비트 시간 매핑
+- 미리보기 설정 갱신 시 재생 위치 소실
+- 렌더 중 Stage 재구성·잘못된 repeat 입력 시 버튼 상태
+
+### Performance
+
+- 실패 지정 단일 EXE cold smoke 메인 창 **43.077초**
+- `import app` 약 2.33초
+
+### Validation
+
+- 전체 테스트 **116 통과**(환경 제한 21 skip)
+- locale 0/0, Ruff F/B, py_compile, pip check 통과
+- Render Space preview/output 비교 + 11 해상도 실제 MP4 통과
+- 환경음 10분 실제 렌더 600.000초(120s 청크 경계 무음·WinError 없음)
+- `short test 2` 프로젝트 복구·분석 3/3·두 곡 미리보기 완료
+
+### Known Issues
+
+- macOS `.app` 실기기 실행·NVENC/QSV/AMF GPU 렌더 미검증
+- 11개 언어 원어민 의미 검수와 고DPI·장문 UI 수동 검수 잔여
+- Windows package cold-start 추가 최적화 잔여
 
 ## 1.3.0 - 2026-07-30
 
